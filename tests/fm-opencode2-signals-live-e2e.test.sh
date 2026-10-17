@@ -20,6 +20,8 @@ fm_live_gate default-on FM_OPENCODE2_SIGNALS_LIVE opencode2 tmux python3 node cu
 . "$ROOT/bin/fm-opencode2-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$ROOT/bin/fm-busy-lib.sh"
+# shellcheck source=bin/fm-tmux-lib.sh
+. "$ROOT/bin/fm-tmux-lib.sh"
 
 NODE_BIN=$(command -v node) || fail "test needs node"
 NODE_BIN_DIR=$(dirname "$NODE_BIN")
@@ -40,6 +42,7 @@ mkdir -p "$LAB"
 cleanup() {
   tmux -L "$SOCKET" kill-server 2>/dev/null || true
   [ -z "${MOCK_PID:-}" ] || kill -TERM "$MOCK_PID" 2>/dev/null || true
+  fm_test_cleanup
 }
 trap cleanup EXIT
 
@@ -143,8 +146,8 @@ rm -f "$turnend"
 # --- launch the real 2.x TUI in tmux with the worker posture ----------------
 cfgdir="$home/state/$id.opencode-config"
 cfg='{"permission":{"*":"allow"},"model":"mockz/mock-1","providers":{"mockz":{"name":"Mock Z","package":"@opencode/ai/providers/anthropic-compatible","settings":{"baseURL":"http://127.0.0.1:'"$MOCK_PORT"'","apiKey":"mock"},"models":{"mock-1":{"name":"Mock 1","capabilities":{"tools":true},"limit":{"context":100000,"output":4096}}}}},"policies":[{"action":"provider.use","resource":"*","effect":"deny"},{"action":"provider.use","resource":"mockz","effect":"allow"}]}'
-tmux -L "$SOCKET" new-session -d -s "$SESSION" -c "$wt" \
-  "env OPENCODE_CONFIG_DIR='$cfgdir' OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='$cfg' '$OC2_BIN' --standalone --prompt 'Reply with exactly OK.'; rc=\$?; printf 'OC2_EXIT=%s\\n' \"\$rc\"; sleep 300"
+tmux -L "$SOCKET" new-session -d -s "$SESSION" -x 100 -y 30 -c "$wt" \
+  "env OPENCODE_CONFIG_DIR='$cfgdir' OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='$cfg' '$OC2_BIN' --standalone --auto --prompt 'Reply with exactly OK.'; rc=\$?; printf 'OC2_EXIT=%s\\n' \"\$rc\"; sleep 300"
 
 capture() { tmux -L "$SOCKET" capture-pane -p -t "$SESSION" 2>/dev/null || true; }
 
@@ -175,9 +178,19 @@ wait_busy_state() {  # <wanted-state> <attempts>
 wait_for "Reply with exactly OK." 120 || fail "the 2.x TUI never rendered the launch prompt"
 wait_busy_state busy 120 || fail "the real event stream never recorded busy"
 wait_busy_state idle 120 || fail "the real event stream never settled idle"
+# The notification is a separate asynchronous write after the idle record.
+# Observing idle does not prove that the notification has finished yet.
+for ((attempt = 0; attempt < 120; attempt++)); do
+  [ -f "$turnend" ] && break
+  sleep 0.5
+done
 [ -f "$turnend" ] || fail "the settle never touched the turn-end notification"
 grep -Fq "event=execution-succeeded" <(cat "$home/state/$id.busy-state") \
   || fail "the idle event was not an execution settle: $(cat "$home/state/$id.busy-state")"
+
+composer=$(TMUX="$(tmux -L "$SOCKET" display-message -p '#{socket_path},#{pid},0')" \
+  fm_tmux_composer_state "$SESSION")
+[ "$composer" = empty ] || fail "the real --auto composer must allow lifecycle exit, got '$composer'"
 
 tmux -L "$SOCKET" send-keys -t "$SESSION" -l "/exit"
 tmux -L "$SOCKET" send-keys -t "$SESSION" Enter

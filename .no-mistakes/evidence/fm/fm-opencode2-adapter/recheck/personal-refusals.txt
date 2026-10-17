@@ -1,0 +1,12 @@
+model=openai/gpt-5.5
+[91m[1mError: [0mModel unavailable: openai/gpt-5.5
+exit=1
+model=minimax-coding-plan/MiniMax-M3
+[91m[1mError: [0mModel unavailable: minimax-coding-plan/MiniMax-M3
+exit=1
+model=zai-coding-plan/glm-5.3
+[91m[1mError: [0mModel unavailable: zai-coding-plan/glm-5.3
+exit=1
+model=ollama/deepseek-coder-v2:16b
+[91m[1mError: [0mModel unavailable: ollama/deepseek-coder-v2:16b
+exit=1

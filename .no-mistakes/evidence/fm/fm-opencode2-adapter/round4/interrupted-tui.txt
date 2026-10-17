@@ -1,0 +1,34 @@
+ • PLATFORM_OK                   +
+  ┃  binding `0.0.0.0` on a host the network can reach.
+  ┃  The brief may only authorize such a surface behind an explicit allowlist or an authenticated/protected
+  ┃  tunnel; anything else is a needs-decision: append `needs-decision [at=<epoch>]: {the port, the tool,
+  ┃  and what it serves}` and stop.
+  ┃
+  ┃  # Task
+  ┃  ## Captain's intent
+  ┃  Reply with exactly PLATFORM_OK. Do not use tools or change files.
+  ┃
+  ┃  ## Firstmate spec
+  ┃  Disposable validation. Reply once and wait.
+  ┃
+
+     + Thought · 7ms
+
+     PLATFORM_OK
+
+     Build · GLM-5.3-Flash · 4.1s · 10.7 tok/s
+
+  ┃
+  ┃  : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'oc2-proof.inbox' steering inbox,
+  ┃  read and act on each in numeric order, then mv each into its handled/.
+  ┃
+
+     Build · GLM-5.3-Flash · 919ms · interrupted
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  …/wo…/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.r4/worker:fm/oc2-proof  22.2K (2%) · $0.00  ctrl+p commands
+

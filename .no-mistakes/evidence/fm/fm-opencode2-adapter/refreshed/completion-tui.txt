@@ -1,0 +1,34 @@
+   PLATFORM_OK                     PLATFORM_OK                   • PLATFORM_RELAUNCHED_OK        +
+  ┃  total 16
+  ┃  drwxrwxr-x 3 dscott dscott 4096 Oct 17 09:37 .
+  ┃  drwxrwxr-x 5 dscott dscott 4096 Oct 17 09:37 ..
+  ┃  -rw------- 1 dscott dscott  202 Oct 17 09:37 001.msg
+  ┃  drwxrwxr-x 2 dscott dscott 4096 Oct 17 09:37 handled
+  ┃  /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.oc2-refreshed/lab/state/
+  ┃  oc2-recheck.inbox/001.msg
+  ┃
+
+     + Thought · 257ms
+
+     → Explored: 1 read
+
+     + Thought · 1.7s
+
+  ┃
+  ┃  $ mv /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.oc2-refreshed/lab/sta
+  ┃  te/oc2-recheck.inbox/001.msg /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EH…
+  ┃
+  ┃  (no output)
+  ┃
+
+     PLATFORM_RELAUNCHED_OK
+
+     Build · GLM-5.3-Flash · 30.7s · 35.2 tok/s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  …/a1…/01M54WH36WR8NGK9EHZG3DDNGF/.oc2-refreshed/worker:fm/oc2-recheck  23.9K (2%) · $0.00  ctrl+p commands
+

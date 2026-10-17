@@ -1,0 +1,106 @@
+[
+  {
+    "pid": "2144295",
+    "config_dir": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.r5/lab/state/oc2-proof.opencode-config",
+    "config": {
+      "permission": {
+        "*": "allow"
+      },
+      "policies": [
+        {
+          "action": "provider.use",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "provider.use",
+          "resource": "alibaba",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "anthropic",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "cloudflare-workers-ai",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "minimax",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "openrouter",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "unified",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "zai",
+          "effect": "allow"
+        }
+      ],
+      "model": "zai/glm-5.3-flash"
+    }
+  },
+  {
+    "pid": "2144371",
+    "config_dir": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.r5/lab/state/oc2-proof.opencode-config",
+    "config": {
+      "permission": {
+        "*": "allow"
+      },
+      "policies": [
+        {
+          "action": "provider.use",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "provider.use",
+          "resource": "alibaba",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "anthropic",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "cloudflare-workers-ai",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "minimax",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "openrouter",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "unified",
+          "effect": "allow"
+        },
+        {
+          "action": "provider.use",
+          "resource": "zai",
+          "effect": "allow"
+        }
+      ],
+      "model": "zai/glm-5.3-flash"
+    }
+  }
+]

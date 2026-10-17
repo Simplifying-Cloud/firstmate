@@ -1,0 +1,2 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.r3/lab
+stopped oc2-proof harness=opencode2 backend=tmux endpoint=primary:fm-oc2-proof worktree=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.r3/worker

@@ -1,0 +1,1 @@
+v1 gen=g1792255903.2139201.23291 seq=3 state=idle source=opencode-plugin event=execution-succeeded ts=1792255910

@@ -1,0 +1,30 @@
+[
+  {
+    "provider": "minimax",
+    "baseURL": "https://ai.simplifying.cloud/models/minimax/anthropic/v1"
+  },
+  {
+    "provider": "zai",
+    "baseURL": "https://ai.simplifying.cloud/models/glm/v4"
+  },
+  {
+    "provider": "openrouter",
+    "baseURL": "https://ai.simplifying.cloud/models/openrouter/v1"
+  },
+  {
+    "provider": "alibaba",
+    "baseURL": "https://ai.simplifying.cloud/models/alibaba/apps/anthropic/v1"
+  },
+  {
+    "provider": "anthropic",
+    "baseURL": "https://ai.simplifying.cloud/models/anthropic/v1"
+  },
+  {
+    "provider": "unified",
+    "baseURL": "https://ai.simplifying.cloud/models/unified"
+  },
+  {
+    "provider": "cloudflare-workers-ai",
+    "baseURL": "https://ai.simplifying.cloud/models/workers-ai"
+  }
+]

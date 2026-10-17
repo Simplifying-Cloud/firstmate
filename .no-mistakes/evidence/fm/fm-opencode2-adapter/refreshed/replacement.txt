@@ -1,0 +1,2 @@
+old config sentinel removed
+PASS: fresh processes, identical provider policy and model, replaced config directory, regenerated plugin and generation

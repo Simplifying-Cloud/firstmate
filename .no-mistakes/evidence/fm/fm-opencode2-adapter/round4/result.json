@@ -1,0 +1,31 @@
+{
+  "verdict": "pass",
+  "tested_head_sha": "2f04a6669330299a23cfb7a6afc07154113e7da8",
+  "summary": "Both remaining live platform scenarios passed; no source changes required.",
+  "root_cause": "Previous platform quota refusal no longer reproduces after owner restored quota.",
+  "scenarios": [
+    {
+      "name": "Complete governed-platform worker turn",
+      "result": "pass",
+      "evidence": [
+        "completion-state.txt",
+        "completion-tui.txt",
+        "policy-before.json"
+      ]
+    },
+    {
+      "name": "Interrupt, relaunch, replace owned configuration, and complete replacement request",
+      "result": "pass",
+      "evidence": [
+        "interrupted-state.txt",
+        "replacement-state.txt",
+        "replacement-tui.txt",
+        "replacement-proof.txt",
+        "policy-after.json",
+        "exit.txt"
+      ]
+    }
+  ],
+  "cleanup": "Worker exited; private tmux server stopped; disposable lab removed; git status clean.",
+  "constraints": "No credentials or limits modified; no broad suite, linters, or other pipeline phases run."
+}

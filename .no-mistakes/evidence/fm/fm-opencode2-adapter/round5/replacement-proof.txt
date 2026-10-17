@@ -1,0 +1,1 @@
+Fresh worker processes; fresh busy generation; owned config sentinel removed; plugin regenerated; provider policies and selected model preserved; replacement execution succeeded.

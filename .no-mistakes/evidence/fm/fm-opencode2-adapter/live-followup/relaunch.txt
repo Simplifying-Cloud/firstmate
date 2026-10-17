@@ -1,0 +1,3 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.test-oc2-live/lab
+error: task oc2-live's composer visibly holds pending text; refusing to type the /exit exit command because it would concatenate onto that text. Clear or submit the pending text, then retry 'relaunch'
+error: relaunch of oc2-live failed while stopping the old agent, which is still running; its original instructions were restored

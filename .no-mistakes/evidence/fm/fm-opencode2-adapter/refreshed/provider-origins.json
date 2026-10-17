@@ -1,0 +1,9 @@
+{
+  "minimax": "https://ai.simplifying.cloud/models/minimax/anthropic/v1",
+  "zai": "https://ai.simplifying.cloud/models/glm/v4",
+  "openrouter": "https://ai.simplifying.cloud/models/openrouter/v1",
+  "alibaba": "https://ai.simplifying.cloud/models/alibaba/apps/anthropic/v1",
+  "anthropic": "https://ai.simplifying.cloud/models/anthropic/v1",
+  "unified": "https://ai.simplifying.cloud/models/unified",
+  "cloudflare-workers-ai": "https://ai.simplifying.cloud/models/workers-ai"
+}

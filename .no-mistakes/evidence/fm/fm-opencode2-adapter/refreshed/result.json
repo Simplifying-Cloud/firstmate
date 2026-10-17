@@ -1,0 +1,30 @@
+{
+  "verdict": "pass",
+  "scenarios": [
+    {
+      "name": "Complete a model turn through governed platform in worker posture",
+      "result": "pass",
+      "live": true
+    },
+    {
+      "name": "Interrupt worker and relaunch with clean owned configuration and successful model execution",
+      "result": "pass",
+      "live": true
+    }
+  ],
+  "root_cause": "Previous stale platform authentication resolved by owner sign-in; worker model execution succeeds. No source or test changes required.",
+  "evidence": [
+    "completion-state.txt",
+    "completion-tui.txt",
+    "completion-notification.txt",
+    "pre-interrupt-state.txt",
+    "interrupt.txt",
+    "interrupted-state.txt",
+    "relaunch.txt",
+    "replacement.txt",
+    "policy-before.json",
+    "policy-after.json",
+    "provider-origins.json"
+  ],
+  "notes": "Control reports cancellation unconfirmed; plugin independently confirms execution-interrupted. Ancestor 1.x primary plugins show nonfatal activation warnings in nested disposable fixture. Worker plugin records lifecycle successfully. Credentials unchanged; no broad tests or other pipeline phases run."
+}

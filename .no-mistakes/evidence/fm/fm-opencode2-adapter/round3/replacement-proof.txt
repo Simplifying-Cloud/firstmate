@@ -1,0 +1,1 @@
+PASS: control-plane relaunch; new busy generation; old config-directory sentinel removed; busy plugin regenerated; running replacement has isolated config directory, blanket provider deny plus platform-provider allows, and zai/glm-5.3-flash selected. Replacement turn remains blocked by platform spend limit.

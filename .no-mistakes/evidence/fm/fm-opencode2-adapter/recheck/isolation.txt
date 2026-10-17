@@ -1,0 +1,3 @@
+Real standalone model catalog providers: alibaba, anthropic, cloudflare-workers-ai, minimax, openrouter, unified, zai
+Policy-allowed platform providers: alibaba, anthropic, cloudflare-workers-ai, minimax, openrouter, unified, zai
+Every catalog provider is allowed by the generated platform-only policy.

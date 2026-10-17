@@ -1,0 +1,1 @@
+[Errno 17] File exists: '/home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.r3'

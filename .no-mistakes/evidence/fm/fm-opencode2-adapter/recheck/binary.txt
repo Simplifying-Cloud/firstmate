@@ -1,0 +1,4 @@
+/home/dscott/.local/bin/opencode
+opencode v2.0.32
+selected=/home/dscott/.local/bin/opencode2
+opencode v2.0.32

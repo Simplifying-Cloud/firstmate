@@ -1,0 +1,34 @@
+ • PLATFORM_OK                   +
+  ┃  md`) is project content and the supervisor contract for the firstmate managing you: follow this brief
+  ┃  instead of that supervisor contract.
+  ┃  Project instructions still govern the work wherever they do not conflict with this worker identity,
+  ┃  including `CONTRIBUTING.md` and `firstmate-coding-guidelines` for Firstmate changes.
+  ┃  Never expose a listening service beyond localhost or open a public tunnel without explicit brief
+  ┃  authorization.
+  ┃  Examples that fall under this rule include `cloudflared tunnel --url`, `ngrok`, `localhost.run`, and
+  ┃  binding `0.0.0.0` on a host the network can reach.
+  ┃  The brief may only authorize such a surface behind an explicit allowlist or an authenticated/protected
+  ┃  tunnel; anything else is a needs-decision: append `needs-decision [at=<epoch>]: {the port, the tool,
+  ┃  and what it serves}` and stop.
+  ┃
+  ┃  # Task
+  ┃  ## Captain's intent
+  ┃  Reply with exactly PLATFORM_OK. Do not use tools or change files.
+  ┃
+  ┃  ## Firstmate spec
+  ┃  Disposable validation. Reply once and wait.
+  ┃
+
+     + Thought · 18ms
+
+     PLATFORM_OK
+
+     Build · GLM-5.3-Flash · 4.2s · 13.8 tok/s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  …/wo…/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.r5/worker:fm/oc2-proof  22.2K (2%) · $0.00  ctrl+p commands
+

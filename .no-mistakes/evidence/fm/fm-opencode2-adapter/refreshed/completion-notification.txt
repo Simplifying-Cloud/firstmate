@@ -1,0 +1,8 @@
+  File: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.oc2-refreshed/lab/state/oc2-recheck.turn-ended
+  Size: 0         	Blocks: 0          IO Block: 4096   regular empty file
+Device: 252,0	Inode: 22551679    Links: 1
+Access: (0664/-rw-rw-r--)  Uid: ( 1000/  dscott)   Gid: ( 1000/  dscott)
+Access: 2026-10-17 09:38:13.518030552 -0700
+Modify: 2026-10-17 09:38:13.518030552 -0700
+Change: 2026-10-17 09:38:13.518030552 -0700
+ Birth: 2026-10-17 09:36:27.094336546 -0700

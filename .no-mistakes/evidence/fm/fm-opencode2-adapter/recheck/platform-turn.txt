@@ -1,0 +1,9 @@
+[0m
+> build · glm-5.3-flash
+> build · glm-5.3-flash
+> build · glm-5.3-flash
+> build · glm-5.3-flash
+> build · glm-5.3-flash
+> build · glm-5.3-flash
+[91m[1mError: [0mTransport: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()
+exit=124

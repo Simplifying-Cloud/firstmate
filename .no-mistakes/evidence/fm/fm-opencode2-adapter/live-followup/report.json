@@ -1,0 +1,40 @@
+{
+  "verdict": "inconclusive",
+  "root_cause": "The composer footer matcher omitted the real OpenCode 2 --auto footer, so an empty composer read pending and fm-control refused exit/relaunch.",
+  "fix": "Recognize Build auto in the final left-bar footer only; retain rejection of footer-like user input.",
+  "scenarios": [
+    {
+      "name": "Reject unsupported secondmate and provider-external model",
+      "result": "pass",
+      "live": true,
+      "evidence": [
+        "secondmate.txt",
+        "forbidden.txt"
+      ],
+      "detail": "Real fm-spawn and installed OpenCode discovery, using a marked disposable lab; both exit 1 with the expected adapter refusal."
+    },
+    {
+      "name": "TUI turn, busy, idle, notification, exit",
+      "result": "partial",
+      "live": true,
+      "detail": "Real governed-platform TUI submitted launch prompt and emitted execution-started. Interrupt emitted execution-interrupted, idle, and notification. fm-control exit passed after footer fix. Successful model-driven settlement remains credential-blocked; mock-provider guard separately passed."
+    },
+    {
+      "name": "Complete governed-platform model turn",
+      "result": "blocked",
+      "live": true,
+      "detail": "Existing credentials yielded HTTP 401 fetching /opencode/config. A real standalone zai/glm-5.3-flash turn timed out with exit 124; TUI turns retried without a completed response. Credentials unchanged."
+    },
+    {
+      "name": "Interrupt/relaunch functioning platform worker and replace configuration",
+      "result": "partial",
+      "live": true,
+      "detail": "Real TUI interrupt and fm-control relaunch passed after footer fix; old owned-directory sentinel disappeared, directory was recreated, busy generation changed, replacement TUI emitted execution-started, and fm-control exit stopped it. End-to-end functioning model execution remains credential-blocked."
+    }
+  ],
+  "verification": {
+    "before": "Composer regression exit 1: expected empty, got pending; real relaunch refused pending text.",
+    "after": "Composer regression and real mock-backed TUI guard passed; real platform TUI relaunch and exit passed. No full suite, lint, formatter, static analysis, or other pipeline phase executed."
+  },
+  "setup": "Initial lab lifecycle calls refused until supported fm-lab-home create used with all overrides unset. Initial isolated XDG copy lacked org config; authoritative credentialed attempt used unchanged existing sign-in. Initial stopped lab task was seeded in a nested disposable Git worktree and launched through real fm-spawn --relaunch; no CLI or discovery mocks used for governed-platform scenarios."
+}

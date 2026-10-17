@@ -1,0 +1,6 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.test-oc2-live/lab
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.test-oc2-live/lab
+warning: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.test-oc2-live/lab/data/oc2-live/launch-brief.md records no ship branch; defaulting to legacy branch fm/oc2-live
+warning: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.test-oc2-live/lab/data/oc2-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: oc2-live ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched oc2-live harness=opencode2 from=opencode2 model=zai/glm-5.3-flash effort=default backend=tmux endpoint=oc2test:fm-oc2-live worktree=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.test-oc2-live/worker

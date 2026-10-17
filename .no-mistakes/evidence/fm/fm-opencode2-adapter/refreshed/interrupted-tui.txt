@@ -1,0 +1,34 @@
+   PLATFORM_OK                   ⠼ PLATFORM_OK                   +
+  ┃  Reply with exactly PLATFORM_OK. Do not use tools or change files.
+  ┃
+  ┃  ## Firstmate spec
+  ┃  This is a disposable live validation. Reply once and wait.
+  ┃
+  ┃  ## Progress note (2026-10-17T16:36:48Z)
+  ┃
+  ┃  This task was relaunched. Continue from here; the local copy and every
+  ┃  uncommitted change are exactly as the previous worker left them.
+  ┃
+  ┃  First, check your instruction inbox: list /home/dscott/.no-mistakes/worktrees/a1211da81307/
+  ┃  01M54WH36WR8NGK9EHZG3DDNGF/.oc2-refreshed/lab/state/oc2-recheck.inbox/*.msg, act on
+  ┃  each message in numeric order, then mv each handled file into
+  ┃  /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.oc2-refreshed/lab/state/
+  ┃  oc2-recheck.inbox/handled/. A steer sent before the relaunch survives there.
+  ┃
+  ┃  Reply exactly PLATFORM_OK without tools or file changes.
+  ┃
+
+     + Thought · 3.8s
+
+  ┃
+  ┃  : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'oc2-recheck.inbox' steering
+  ┃  inbox, read and act on each in numeric order, then mv each into its handled/.
+  ┃
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ■⬝⬝⬝⬝⬝⬝⬝ esc interrupt                                                             $0.00  ctrl+p commands
+

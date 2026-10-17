@@ -1,0 +1,2 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.test-oc2-live/lab
+error: opencode2 is a verified crewmate/scout adapter only and cannot run a secondmate; its 2.x primary supervision integration is not verified. Select a harness verified for secondmates.

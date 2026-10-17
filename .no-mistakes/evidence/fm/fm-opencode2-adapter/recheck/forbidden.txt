@@ -1,0 +1,4 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M54WH36WR8NGK9EHZG3DDNGF/.oc2-recheck/lab
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: opencode2 model 'openai/gpt-5.5' does not name one of the platform providers (alibaba anthropic cloudflare-workers-ai minimax openrouter unified zai); every worker model request must go through the platform
+exit=1

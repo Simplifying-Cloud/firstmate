@@ -2286,7 +2286,11 @@ clear_relaunch_harness_wiring() {
   fi
   while IFS= read -r path; do
     [ -n "$path" ] || continue
-    rm -f -- "$path" || return 1
+    if [ "$harness" = opencode2 ] && [ "$path" = "$state/$id.opencode-config" ]; then
+      rm -rf -- "$path" || return 1
+    else
+      rm -f -- "$path" || return 1
+    fi
   done <<EOF
 $(fm_control_harness_wiring_paths "$harness" "$wt" "$state" "$id")
 EOF
@@ -3271,8 +3275,8 @@ opencode2)
   # of at the pane. bin/fm-opencode2-lib.sh owns each fail-closed decision.
   # shellcheck source=bin/fm-opencode2-lib.sh
   . "$FM_ROOT/bin/fm-opencode2-lib.sh"
-  OC2_BIN=$(fm_opencode2_resolve_binary "$CONFIG") || exit 1
-  OC2_PLATFORM=$(fm_opencode2_platform_origin "$CONFIG") || exit 1
+  OC2_BIN=$(fm_opencode2_resolve_binary) || exit 1
+  OC2_PLATFORM='https://ai.simplifying.cloud'
   OC2_PROVIDERS=$(fm_opencode2_platform_providers "$OC2_BIN" "$OC2_PLATFORM" | paste -sd' ' -) || exit 1
   [ -n "$OC2_PROVIDERS" ] || {
     echo "error: no OpenCode providers route through the platform origin $OC2_PLATFORM; an opencode2 worker may not launch where it could use any other provider" >&2
@@ -5367,9 +5371,8 @@ EOF
 // a detached loop that the returned cleanup aborts. Semantic state comes from
 // the session.execution events: started is active, and succeeded, failed, and
 // interrupted (including a manual double-Escape cancel) all close a turn, so an
-// abnormal end can never leave a stale busy record. 2.0.32 never publishes the
-// legacy session.status / session.idle events; those arms stay as forward-compat
-// no-ops. Scoping latches the first session that starts an execution (the
+// abnormal end can never leave a stale busy record. Scoping latches the first
+// session that starts an execution (the
 // worker's main session - a subagent child session can only start while the
 // main session is already busy) and ignores other sessions' events until the
 // latched session settles, so a child's completion can never clear the
@@ -5406,22 +5409,6 @@ export default {
               await busyEvent("idle", "execution-" + event.type.split(".").pop());
               await touchTurnend();
             }
-          } else if (event.type === "session.status") {
-            const statusType = data.status && data.status.type;
-            if (statusType === "busy" || statusType === "retry") {
-              if (activeSession === null) activeSession = sessionID;
-              if (sessionID === activeSession) await busyEvent("busy", "session-" + statusType);
-            } else if (statusType === "idle" && sessionID === activeSession) {
-              activeSession = null;
-              await busyEvent("idle", "session-status-idle");
-              await touchTurnend();
-            }
-          } else if (event.type === "session.idle") {
-            if (sessionID === activeSession) {
-              activeSession = null;
-              await busyEvent("idle", "session-idle");
-            }
-            await touchTurnend();
           }
         }
       } catch {

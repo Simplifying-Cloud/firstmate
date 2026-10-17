@@ -2,8 +2,7 @@
 # Behavior tests for the verified OpenCode 2.x crewmate/scout adapter.
 #
 # The facts pinned here are the ones a wrong guess would make dangerous:
-#   1. The 2.x binary is selected without PATH-order dependence: a pin that
-#      does not answer "opencode v2." for --version refuses, and detection
+#   1. The 2.x binary is selected without PATH-order dependence: detection
 #      never falls through to a 1.x `opencode` that shares the name.
 #   2. The launch is standalone with an isolated config dir, disables
 #      self-update, carries the platform-only provider policies and the model
@@ -163,27 +162,14 @@ classify() {  # <id> <state-dir>
   fm_busy_classify tmux fake:w opencode2 "$1" "$2"
 }
 
-test_oc2_binary_resolution_refuses_a_non_2x_pin() {
+test_oc2_binary_resolution_refuses_without_2x() {
   local out
-  # A controlled PATH and HOME hold no 2.x candidate anywhere, and the same
-  # call must also refuse a pin that answers a 1.x version.
   out=$(HOME="$TMP_ROOT/no-home" PATH="$BASE_PATH" \
-    bash -c '. "$1/bin/fm-opencode2-lib.sh"; fm_opencode2_resolve_binary "$2"' \
-    _ "$ROOT" "$TMP_ROOT/no-config" 2>&1 </dev/null)
+    bash -c '. "$1/bin/fm-opencode2-lib.sh"; fm_opencode2_resolve_binary' \
+    _ "$ROOT" 2>&1 </dev/null)
   case "$out" in
   *"no OpenCode 2.x executable found"*) ;;
   *) fail "absent install should refuse loudly, got: $out" ;;
-  esac
-  mkdir -p "$TMP_ROOT/pin-case"
-  printf 'not-2x\n' >"$TMP_ROOT/pin-case/binary"
-  chmod +x "$TMP_ROOT/pin-case/binary"
-  printf '%s\n' "$TMP_ROOT/pin-case/binary" >"$TMP_ROOT/pin-case/opencode2-binary"
-  out=$(HOME="$TMP_ROOT/no-home" PATH="$BASE_PATH" \
-    bash -c '. "$1/bin/fm-opencode2-lib.sh"; fm_opencode2_resolve_binary "$2"' \
-    _ "$ROOT" "$TMP_ROOT/pin-case" 2>&1 </dev/null)
-  case "$out" in
-  *"config/opencode2-binary names"*) ;;
-  *) fail "a non-2.x pin should refuse with the pin's name, got: $out" ;;
   esac
   pass "opencode2 binary resolution refuses without a proven 2.x executable"
 }
@@ -233,17 +219,6 @@ test_oc2_model_outside_the_platform_refuses() {
   assert_contains "$out" "does not name one of the platform providers" "refusal must name the platform constraint"
   [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "a refused spawn must leave no task record"
   pass "opencode2 refuses a model outside the discovered platform providers"
-}
-
-test_oc2_broken_pin_refuses() {
-  local rec id=oc2-pin-bad out
-  rec=$(make_oc2_spawn_case pin-bad "$id")
-  read_oc2_spawn_record "$rec"
-  printf '%s\n' "$FAKEBIN_DIR/opencode" >"$HOME_DIR/config/opencode2-binary"
-  FM_FAKE_OC2_VERSION="1.18.31" out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
-  expect_code 1 "$?" "a pin naming a 1.x binary must refuse"
-  assert_contains "$out" "config/opencode2-binary" "refusal must name the pin"
-  pass "opencode2 refuses a pin that does not answer opencode v2."
 }
 
 test_oc2_secondmate_is_refused() {
@@ -352,13 +327,11 @@ test_oc2_control_mechanics_are_the_verified_ones() {
   pass "opencode2 control mechanics match the verified 2.x facts"
 }
 
-test_oc2_binary_resolution_refuses_a_non_2x_pin \
+test_oc2_binary_resolution_refuses_without_2x \
   &&
   test_oc2_spawn_launches_platform_only_and_standalone \
   &&
   test_oc2_model_outside_the_platform_refuses \
-  &&
-  test_oc2_broken_pin_refuses \
   &&
   test_oc2_secondmate_is_refused \
   &&

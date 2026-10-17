@@ -24,7 +24,7 @@ fm_live_gate default-on FM_OPENCODE2_SIGNALS_LIVE opencode2 tmux python3 node cu
 NODE_BIN=$(command -v node) || fail "test needs node"
 NODE_BIN_DIR=$(dirname "$NODE_BIN")
 BASE_PATH=${FM_TEST_BASE_PATH:-$NODE_BIN_DIR:/usr/bin:/bin:/usr/sbin:/sbin}
-OC2_BIN=$(fm_opencode2_resolve_binary '') || fail "no proven OpenCode 2.x executable"
+OC2_BIN=$(fm_opencode2_resolve_binary) || fail "no proven OpenCode 2.x executable"
 OC2_VERSION=$("$OC2_BIN" --version | head -n1)
 case "$OC2_VERSION" in
 'opencode v2.'*) ;;

@@ -12,11 +12,9 @@
 # Selection never depends on PATH order: OpenCode 1.x and 2.x are separate
 # packages that both install an `opencode` command, so which one a bare
 # `opencode` resolves to is a property of the caller's PATH, not of the
-# install. The pin and every fallback candidate are therefore gated on the
+# install. Every candidate is therefore gated on the
 # binary's own `--version` answer, which 2.x prefixes with "opencode v2."
 # and 1.x prints bare.
-
-FM_OPENCODE2_PLATFORM_DEFAULT='https://ai.simplifying.cloud'
 
 fm_opencode2_version_is_2() {  # <first-version-line>
   case "$1" in
@@ -33,24 +31,13 @@ fm_opencode2_candidate_is_2() {  # <path>
   fm_opencode2_version_is_2 "$out"
 }
 
-# fm_opencode2_resolve_binary <config-dir>: print the concrete OpenCode 2.x
-# executable. config/opencode2-binary wins when it names a proven 2.x binary
-# and refuses the spawn when it names anything else; without a pin the
-# unambiguous 2.x command name `opencode2` (1.x installs no such name) is
+# fm_opencode2_resolve_binary: print the concrete OpenCode 2.x
+# executable. The unambiguous 2.x command name `opencode2` (1.x installs no such name) is
 # resolved on PATH, then the concrete per-user install paths, every candidate
 # gated on a live --version check.
 fm_opencode2_resolve_binary() {
-  local config=$1 pin bin home=${HOME:-/root}
+  local bin home=${HOME:-/root}
   home=$(printf '%s' "$home" | head -n1)
-  if [ -n "$config" ] && [ -f "$config/opencode2-binary" ]; then
-    pin=$(head -n1 "$config/opencode2-binary" 2>/dev/null)
-    if fm_opencode2_candidate_is_2 "$pin"; then
-      printf '%s\n' "$pin"
-      return 0
-    fi
-    echo "error: config/opencode2-binary names '${pin:-<empty>}', which does not answer 'opencode v2.' for --version; fix the pin to a working OpenCode 2.x executable or remove it" >&2
-    return 1
-  fi
   bin=$(command -v opencode2 2>/dev/null) || bin=
   if [ -n "$bin" ] && fm_opencode2_candidate_is_2 "$bin"; then
     printf '%s\n' "$bin"
@@ -62,33 +49,8 @@ fm_opencode2_resolve_binary() {
       return 0
     fi
   done
-  echo "error: no OpenCode 2.x executable found (tried config/opencode2-binary, opencode2 on PATH, ~/.local/bin/opencode2, ~/.local/bin/opencode, each verified through --version); install OpenCode 2.x (@opencode/cli) or pin config/opencode2-binary" >&2
+  echo "error: no OpenCode 2.x executable found (tried opencode2 on PATH, ~/.local/bin/opencode2, ~/.local/bin/opencode, each verified through --version); install OpenCode 2.x (@opencode/cli)" >&2
   return 1
-}
-
-# fm_opencode2_platform_origin <config-dir>: print the governed platform origin
-# every worker provider must route through, defaulting to the captain's
-# platform and overridable through config/opencode2-platform.
-fm_opencode2_platform_origin() {
-  local config=$1 origin
-  origin=$FM_OPENCODE2_PLATFORM_DEFAULT
-  if [ -n "$config" ] && [ -f "$config/opencode2-platform" ]; then
-    origin=$(head -n1 "$config/opencode2-platform" 2>/dev/null)
-    case "$origin" in
-    https://* | http://*) ;;
-    *)
-      echo "error: config/opencode2-platform must be an http(s) origin such as $FM_OPENCODE2_PLATFORM_DEFAULT, got '${origin:-<empty>}'" >&2
-      return 1
-      ;;
-    esac
-    case "$origin" in
-    */)
-      echo "error: config/opencode2-platform must be an origin without a trailing slash, got '$origin'" >&2
-      return 1
-      ;;
-    esac
-  fi
-  printf '%s\n' "$origin"
 }
 
 # fm_opencode2_platform_providers <binary> <origin>: print the provider ids

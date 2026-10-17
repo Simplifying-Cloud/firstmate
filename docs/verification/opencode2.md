@@ -52,7 +52,7 @@ Facts established live:
 
 - A `setup` that never returns blocks the whole location: every subsequent API call (including `/api/model`) fails with `ServiceUnavailableError: Location plugins did not finish activating` after five seconds, and the TUI footer parks on `No provider selected`. The shipped plugin therefore consumes its event stream in a detached loop and aborts it from the returned cleanup.
 - A complete turn emitted exactly `session.created`, `session.inbox.enqueued`/`delivered`, `session.execution.started`, `session.step.*`/`session.text.*`, `session.usage.updated`, `session.execution.succeeded`.
-- `session.status` and `session.idle` never appeared in any turn on 2.0.32; the 2.0.32 source ships them only in the event schema, so the plugin's arms for them are forward-compat no-ops and busy/idle ride the execution events. `session.execution.interrupted` carries `reason:"user"` for a manual cancel, and `session.retry.scheduled` fires while the execution stays open (provider `ConnectionRefused` retries were observed recovering once the mock returned).
+- `session.status` and `session.idle` never appeared in any turn on 2.0.32; the 2.0.32 source ships them only in the event schema, so busy/idle ride the execution events. `session.execution.interrupted` carries `reason:"user"` for a manual cancel, and `session.retry.scheduled` fires while the execution stays open (provider `ConnectionRefused` retries were observed recovering once the mock returned).
 - Driving the real generated plugin through the real fm-spawn and a real TUI turn (the live guard below) recorded `busy opencode-plugin` on execution start and `idle opencode-plugin` with `event=execution-succeeded`, and touched the turn-end notification marker.
 
 ## Lifecycle

@@ -72,7 +72,7 @@ fm_opencode2_platform_providers() {
     echo "error: could not read '$binary debug config' to discover the platform providers (exit $rc); is the OpenCode 2.x install working?" >&2
     return 1
   }
-  out=$(printf '%s\n' "$out" | python3 -c '
+  if ! out=$(printf '%s\n' "$out" | python3 -c '
 import json, sys
 
 origin = sys.argv[1]
@@ -93,11 +93,10 @@ for doc in docs:
         if isinstance(base, str) and base.startswith(origin + "/") and pid not in allow:
             allow.append(pid)
 print("\n".join(sorted(allow)))
-' "$origin")
-  [ "$?" -eq 0 ] || {
+' "$origin"); then
     echo "error: could not parse '$binary debug config' output as JSON to discover the platform providers" >&2
     return 1
-  }
+  fi
   printf '%s\n' "$out"
 }
 

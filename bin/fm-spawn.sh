@@ -436,6 +436,10 @@
 #     __DEVINBIN__ resolved Devin executable
 #     __DEVINCONFIG__ private per-task Devin config with lifecycle hooks
 #     __AGYBIN__    resolved, agy-verified executable for an agy launch
+#     __OC2BIN__    resolved, version-verified OpenCode 2.x executable (bin/fm-opencode2-lib.sh)
+#     __OC2CFGDIR__ firstmate-owned per-task isolated opencode config directory
+#     __OC2POLICIES__ platform-only provider policies JSON fragment (opencode2)
+#     __OC2MODEL__   ,"model":"..." JSON fragment for the resolved model (opencode2)
 # Verified per-harness turn-end hooks are installed automatically where enabled; some live outside the worktree.
 # Kimi uses one surgically installed Firstmate region in $HOME/.kimi-code/config.toml,
 # a firstmate-owned global hook and registry, and a gitignored per-task pointer.
@@ -1690,6 +1694,15 @@ spawn_sandbox_task() {
     echo "error: Claude in sandboxes requires a credential design in config/sandbox-credentials, which currently refuses a Claude destination" >&2
     exit 1
     ;;
+  opencode2)
+    # An opencode2 worker's every model request rides the platform's org
+    # config and credential in the operator's per-user OpenCode store, which a
+    # sandbox host does not have; there is no sandbox credential lane for it
+    # (docs/remote-sandboxes.md), so placement stays local-only rather than
+    # launching a worker whose platform providers cannot even resolve.
+    echo "error: opencode2 needs the operator's OpenCode 2.x platform sign-in, which a sandbox host does not carry; place opencode2 work locally or select a different harness" >&2
+    exit 1
+    ;;
   codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin) ;;
   *)
     echo "error: --placement sandbox needs a verified harness adapter, not '$SBX_HARNESS'; a raw launch command cannot run in a sandbox" >&2
@@ -2273,7 +2286,11 @@ clear_relaunch_harness_wiring() {
   fi
   while IFS= read -r path; do
     [ -n "$path" ] || continue
-    rm -f -- "$path" || return 1
+    if [ "$harness" = opencode2 ] && [ "$path" = "$state/$id.opencode-config" ]; then
+      rm -rf -- "$path" || return 1
+    else
+      rm -f -- "$path" || return 1
+    fi
   done <<EOF
 $(fm_control_harness_wiring_paths "$harness" "$wt" "$state" "$id")
 EOF
@@ -2906,6 +2923,24 @@ launch_template() {
     fi
     ;;
   opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # OpenCode 2.x (@opencode/cli) worker posture. --standalone is load-bearing:
+  # 2.x normally shares one per-user background server started with the
+  # operator's own environment, and that server ignores this launch's
+  # OPENCODE_CONFIG_CONTENT entirely, so the platform-only policies, the model,
+  # and the busy-state plugin's project config would all silently not apply;
+  # --standalone gives the worker a private server that reads exactly this
+  # launch's environment (verified live, opencode 2.0.32). OPENCODE_CONFIG_DIR
+  # points at a firstmate-owned per-task directory so the operator's own global
+  # config, plugins, and MCP servers do not load, while the org config and the
+  # credential store live outside it and still reach the worker. The 2.x TUI
+  # has no --model flag, so the resolved model rides the config JSON, and the
+  # policies deny every provider except the discovered platform ones
+  # (bin/fm-opencode2-lib.sh owns discovery and the fragments). --auto is the
+  # 2.x-native auto-approve; the migrated permission allow-all keeps the same
+  # posture for any non-interactive path. OPENCODE_DISABLE_AUTOUPDATE keeps a
+  # background self-upgrade from exiting the worker mid-task, which 1.x was
+  # known to do.
+  opencode2) printf '%s' 'OPENCODE_CONFIG_DIR=__OC2CFGDIR__ OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__OC2POLICIES____OC2MODEL__}'\'' __OC2BIN__ --standalone --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIRESUME__ --approve'
     if [ "$kind" = secondmate ]; then
@@ -3156,6 +3191,16 @@ if [ "$KIND" = secondmate ] && [ "$HARNESS" = rovo ]; then
   exit 1
 fi
 
+# opencode2 carries the same gap: its 2.x primary integration (turn-end guard,
+# watch-arm, session-start nudge plugins) is not verified - the tracked
+# .opencode/plugins are the 1.x named-export form, which the 2.x plugin loader
+# ignores - so an opencode2 secondmate could never arm a supervision cycle
+# (verified against the 2.x loader contract, opencode 2.0.32).
+if [ "$KIND" = secondmate ] && [ "$HARNESS" = opencode2 ]; then
+  echo "error: opencode2 is a verified crewmate/scout adapter only and cannot run a secondmate; its 2.x primary supervision integration is not verified. Select a harness verified for secondmates." >&2
+  exit 1
+fi
+
 case "$HARNESS" in
 devin)
   DEVIN_BIN=$(command -v devin) || {
@@ -3223,6 +3268,23 @@ agy)
     exit 1
   }
   ;;
+opencode2)
+  # Resolve the 2.x binary, the platform origin, and the platform provider
+  # allowlist before any worktree or endpoint exists, so a machine without a
+  # proven 2.x install or without a discoverable platform refuses here instead
+  # of at the pane. bin/fm-opencode2-lib.sh owns each fail-closed decision.
+  # shellcheck source=bin/fm-opencode2-lib.sh
+  . "$FM_ROOT/bin/fm-opencode2-lib.sh"
+  OC2_BIN=$(fm_opencode2_resolve_binary) || exit 1
+  OC2_PLATFORM='https://ai.simplifying.cloud'
+  OC2_PROVIDERS=$(fm_opencode2_platform_providers "$OC2_BIN" "$OC2_PLATFORM" | paste -sd' ' -) || exit 1
+  [ -n "$OC2_PROVIDERS" ] || {
+    echo "error: no OpenCode providers route through the platform origin $OC2_PLATFORM; an opencode2 worker may not launch where it could use any other provider" >&2
+    exit 1
+  }
+  read -r -a OC2_PROVIDER_LIST <<<"$OC2_PROVIDERS"
+  OC2_POLICIES=$(fm_opencode2_policies_json "${OC2_PROVIDER_LIST[@]}") || exit 1
+  ;;
 esac
 
 # config/secondmate-harness may carry optional model/effort tokens alongside the
@@ -3260,6 +3322,15 @@ if [ "$HARNESS" = omp ]; then
 fi
 if [ "$HARNESS" = agy ]; then
   agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
+fi
+if [ "$HARNESS" = opencode2 ]; then
+  # The 2.x TUI takes no --model flag; the resolved model rides the launch's
+  # config JSON instead, and a model outside the discovered platform providers
+  # refuses here rather than dying in the pane.
+  OC2_MODEL=
+  if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
+    OC2_MODEL=$(fm_opencode2_model_json "$MODEL" "${OC2_PROVIDER_LIST[@]}") || exit 1
+  fi
 fi
 # Worker account pin (header above): resolved before any endpoint, worktree, or
 # record exists. An absent pin selects nothing and leaves every later launch
@@ -3532,6 +3603,16 @@ effort_flag_for_harness() {
     model_json=$(json_escape "$model")
     model_json=${model_json//\'/\'\\\'\'}
     printf ',"agent":{"build":{"model":"%s","variant":"%s"}}' "$model_json" "$effort"
+    ;;
+  opencode2)
+    # OpenCode 2.x keeps the same agent.<name>.variant schema shape, but the
+    # adapter's platform org config defines its providers' models inline and
+    # none of them exposes a variant list on 2.0.32 (verified via
+    # `opencode debug config`: every platform model carries capabilities and
+    # limits, never variants), so there is nothing a variant could resolve
+    # against and the axis stays recorded in task metadata but omitted from
+    # the launch (record-and-omit, like an unsupported codex level).
+    return 0
     ;;
   muse)
     # muse 0.1.0-R708.1 --reasoning-effort accepts none|minimal|low|medium|
@@ -5278,7 +5359,68 @@ EOF
     ;;
   opencode*)
     mkdir -p "$WT/.opencode/plugins"
-    cat >"$WT/.opencode/plugins/fm-busy-state.js" <<EOF
+    if [ "$HARNESS" = opencode2 ]; then
+      cat >"$WT/.opencode/plugins/fm-busy-state.js" <<EOF
+// Firstmate semantic busy-state events + turn-end notification; written by
+// fm-spawn under the contract owned by bin/fm-busy-lib.sh.
+// OpenCode 2.x plugin form: the module's DEFAULT export must be { id, setup }
+// and setup must return - a setup that never returns blocks the whole location,
+// after which every API call fails with "Location plugins did not finish
+// activating" after five seconds (verified live, opencode 2.0.32). Events
+// arrive as { type, data } through ctx.event.subscribe(); they are consumed in
+// a detached loop that the returned cleanup aborts. Semantic state comes from
+// the session.execution events: started is active, and succeeded, failed, and
+// interrupted (including a manual double-Escape cancel) all close a turn, so an
+// abnormal end can never leave a stale busy record. Scoping latches the first
+// session that starts an execution (the
+// worker's main session - a subagent child session can only start while the
+// main session is already busy) and ignores other sessions' events until the
+// latched session settles, so a child's completion can never clear the
+// worker's busy state. The latched settle touch stays the watcher's wake
+// NOTIFICATION, never current-state truth.
+import { execFile } from "node:child_process";
+const busyEvent = (state, event) =>
+  new Promise((resolve) => {
+    execFile("$FM_ROOT/bin/fm-busy-event.sh", [
+      "apply", "$STATE_REAL", "$ID", state,
+      "--gen", "$BUSY_GEN", "--source", "opencode-plugin", "--event", event,
+    ], () => resolve());
+  });
+const touchTurnend = () =>
+  new Promise((resolve) => {
+    execFile("touch", ["$TURNEND"], () => resolve());
+  });
+export default {
+  id: "fm-busy-state",
+  setup: async (ctx) => {
+    let activeSession = null;
+    const stop = new AbortController();
+    (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
+          const data = event.data || {};
+          const sessionID = data.sessionID;
+          if (event.type === "session.execution.started") {
+            if (activeSession === null) activeSession = sessionID;
+            if (sessionID === activeSession) await busyEvent("busy", "execution-started");
+          } else if (event.type === "session.execution.succeeded" || event.type === "session.execution.failed" || event.type === "session.execution.interrupted") {
+            if (sessionID === activeSession) {
+              activeSession = null;
+              await busyEvent("idle", "execution-" + event.type.split(".").pop());
+              await touchTurnend();
+            }
+          }
+        }
+      } catch {
+        /* the event stream closes at shutdown */
+      }
+    })();
+    return () => stop.abort();
+  },
+};
+EOF
+    else
+      cat >"$WT/.opencode/plugins/fm-busy-state.js" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
 // Semantic state comes from OpenCode's session.status events: busy and retry
@@ -5327,6 +5469,7 @@ export const FmBusyState = async () => {
   };
 };
 EOF
+    fi
     exclude_path '.opencode/plugins/fm-busy-state.js'
     ;;
   pi | pi-signed)
@@ -5825,6 +5968,19 @@ devin)
   LAUNCH=${LAUNCH//__DEVINCONFIG__/"$(shell_quote "$STATE_REAL/$ID.devin-config.json")"}
   ;;
 agy) LAUNCH=${LAUNCH//__AGYBIN__/"$(shell_quote "$AGY_BIN")"} ;;
+opencode2)
+  # The per-task isolated config directory is created here, after every
+  # validation refused, so a failed spawn leaves no empty directory behind.
+  OC2_CFG_DIR="$STATE_REAL/$ID.opencode-config"
+  mkdir -p "$OC2_CFG_DIR" || {
+    echo "error: could not create the isolated opencode config directory $OC2_CFG_DIR" >&2
+    exit 1
+  }
+  LAUNCH=${LAUNCH//__OC2BIN__/"$(shell_quote "$OC2_BIN")"}
+  LAUNCH=${LAUNCH//__OC2CFGDIR__/"$(shell_quote "$OC2_CFG_DIR")"}
+  LAUNCH=${LAUNCH//__OC2POLICIES__/$OC2_POLICIES}
+  LAUNCH=${LAUNCH//__OC2MODEL__/${OC2_MODEL:-}}
+  ;;
 esac
 LAUNCH=${LAUNCH//__WORKTREE__/$sq_worktree}
 # A record-backed launch brief is published into the state dir of the pane
@@ -5852,7 +6008,7 @@ case "$LAUNCH" in
   ;;
 esac
 case "$HARNESS" in
-claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin)
+claude | codex | opencode | opencode2 | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin)
   LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
   ;;
 esac

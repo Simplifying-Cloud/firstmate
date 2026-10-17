@@ -98,7 +98,7 @@ The provider command must satisfy the invocation, record framing, ownership-labe
 - Render the brief for the sandbox home with `bin/fm-brief.sh ... --for-home <remote_home> --for-root <remote_root>`, using the values `bin/fm-sandbox.sh config` prints; spawn refuses a brief that does not name that home's status file.
 - `--sandbox-profile <name>` defaults to the provider's default profile.
   Any other profile, such as `open`, needs an explicit captain instruction for that exact task, recorded in its brief with `fm-brief.sh --sandbox-profile <name>`; spawn refuses it otherwise.
-- Claude (unsupported by `config/sandbox-credentials` even after the Pi smoke run), second mates, `local-only` ships, backends other than tmux, raw harness commands, and briefs carrying the `--herdr-lab` contract are refused.
+- Claude (unsupported by `config/sandbox-credentials` even after the Pi smoke run), second mates, `local-only` ships, backends other than tmux, raw harness commands, opencode2 (a sandbox host has none of the operator's OpenCode 2.x platform sign-in, so its org providers cannot resolve there), and briefs carrying the `--herdr-lab` contract are refused.
 - A sandboxed Pi worker needs `--model <provider>/<id>` and a [credential](#credentials) for that provider.
   This home's worker account pins do not apply, because a sandbox's credentials come only from `config/sandbox-credentials`.
 

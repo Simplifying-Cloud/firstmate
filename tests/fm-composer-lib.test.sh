@@ -682,6 +682,11 @@ test_matrix_opencode_leftbar_signals() {
   assert_screen "opencode idle on herdr" empty "$CAPS_STYLED" "$dim_screen"
   assert_screen "opencode idle on zellij" empty "$CAPS_STYLED_NOID" "$dim_screen"
   assert_screen "opencode idle on cmux/orca" empty "$CAPS_PLAIN" "$screen"
+  # OpenCode 2.0.32 --auto adds its permission mode before the model separator.
+  captured_idle=$'  ┃\n  ┃\n  ┃\n  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway\n  ╹▀▀▀▀▀▀▀▀'
+  assert_screen "opencode2 auto idle on tmux" empty "$CAPS_TMUX" "$captured_idle" 1
+  captured_pending=$'  ┃\n  ┃  Build auto · keep this draft\n  ┃\n  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway\n  ╹▀▀▀▀▀▀▀▀'
+  assert_screen "opencode2 auto footer-like draft on tmux" pending "$CAPS_TMUX" "$captured_pending" 1
   # This sanitized live OpenCode 1.18.30 capture preserves its U+2026 hint and
   # RGB 128 styling. RGB 128 is deliberately outside the ghost threshold, so
   # the placeholder spelling is the independent empty signal. The completed-

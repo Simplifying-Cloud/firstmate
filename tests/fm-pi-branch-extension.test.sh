@@ -1059,6 +1059,11 @@ const operational = spawnSync(
   { encoding: "utf8", input: "operational watcher injection" },
 );
 if (operational.status !== 0) throw new Error(`could not create operational input: ${operational.stderr}`);
+await fire("before_agent_start", {
+  type: "before_agent_start",
+  messageType: "custom",
+  message: { role: "custom", customType: "notice", content: explicitRequest, display: true },
+}, mainCtx);
 await fire("before_agent_start", { prompt: operational.stdout }, mainCtx);
 entries.push({ type: "message", message: { role: "user", content: operational.stdout } });
 const unsolicitedPrompt = "Please keep responses concise while monitoring the fleet.";
@@ -1116,6 +1121,9 @@ for (let index = 0; index < requestedPrompts.length; index += 1) {
 const mirroredCaptainText = globalThis.__fmSessions[0].ops
   .filter((op) => op.kind === "custom" && op.message.customType === "fm-main-mirror")
   .map((op) => op.message.content);
+if (mirroredCaptainText.includes(`[captain] ${explicitRequest}`)) {
+  throw new Error("a custom-message start entered captain mirror context");
+}
 for (const content of [unsolicitedPrompt, ...requestedPrompts]) {
   const copies = mirroredCaptainText.filter((text) => text === `[captain] ${content}`).length;
   if (copies !== 1) throw new Error(`current captain prompt was mirrored ${copies} times instead of once`);

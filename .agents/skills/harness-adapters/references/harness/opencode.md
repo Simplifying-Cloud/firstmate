@@ -3,7 +3,7 @@
 Verified on 2026-06-11 across versions 1.15.7 through 1.17.6, with busy-queue behavior re-verified on 2026-07-20 using 1.18.4.
 `opencode2` (OpenCode 2.x, the separate @opencode/cli package) is verified on 2026-10-17 on 2.0.32 for crewmate and scout launches only; the "OpenCode 2.x" section below owns its differences.
 
-## Operating facts
+## OpenCode 1.x operating facts
 
 | Fact | Value |
 |---|---|
@@ -52,7 +52,7 @@ Verified live on 2026-10-17 against `opencode v2.0.32` (installed as `~/.local/b
 
 | Fact | Value |
 |---|---|
-| Binary | Selected by `bin/fm-opencode2-lib.sh` without PATH-order dependence: `opencode2` on PATH (a name 1.x never installs), then the concrete `~/.local/bin` candidates, every one gated on a live `opencode v2.` answer to `--version`. |
+| Binary | [The resolver](../../../../../bin/fm-opencode2-lib.sh) owns version-gated executable selection independently of the bare `opencode` on PATH. |
 | Platform traffic | Every model request must go through the governed platform (`https://ai.simplifying.cloud`). The launch discovers the org config's providers whose `baseURL` routes through the origin (`<binary> debug config`), and `OPENCODE_CONFIG_CONTENT` carries `policies` denying `provider.use` for `*` and allowing exactly those providers. Selecting any other model (the operator's personal `openai/*`, `minimax-coding-plan/*`, `zai-coding-plan/*`, `ollama/*`) is refused locally with `Error: Model unavailable: <model>`, and `fm-spawn` refuses a `--model` outside the discovered set before launch. |
 | Server isolation | `--standalone` is load-bearing: without it the worker joins the operator's per-user background server, which was started with the operator's environment and ignores this launch's `OPENCODE_CONFIG_CONTENT`, so the policies, model, and project plugin would silently not apply. With it the worker gets a private server inheriting exactly the launch environment. |
 | Config isolation | `OPENCODE_CONFIG_DIR` points at a firstmate-owned per-task empty directory, so the operator's global `~/.config/opencode` (their own plugins, MCP servers, theme) does not load; the org config and the credential store live in the data directory outside it and still reach the worker. |
@@ -67,4 +67,4 @@ Verified live on 2026-10-17 against `opencode v2.0.32` (installed as `~/.local/b
 | Busy-queued Enter | Same shape as 1.18.4: while mid-turn the composer keeps the typed text and Enter enqueues the message (`session.inbox.enqueued` with `delivery: steer`), delivered when the turn ends. |
 | Auto-update | `OPENCODE_DISABLE_AUTOUPDATE=1` in the launch keeps a background self-upgrade from exiting the worker mid-task (log line `update check skipped reason=disabled`). |
 
-Sandbox placement is refused: a sandbox host has none of the operator's OpenCode 2.x platform sign-in, so its org providers cannot resolve there (`docs/remote-sandboxes.md`).
+For the sandbox refusal and credential boundary, see [remote sandboxes](../../../../../docs/remote-sandboxes.md).

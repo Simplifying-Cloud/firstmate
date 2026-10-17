@@ -81,7 +81,7 @@ ok - opencode2 plugin classifies from session.execution events, scoped to the la
 ok - opencode2 opencode v2.0.32 live: standalone TUI turn drove the generated plugin busy->idle with the notification touch, and /exit left the pane
 ```
 
-The portable suite pins binary selection, the platform-only launch line, the isolated config dir, model refusals, the pin refusal, the secondmate refusal, the generated plugin's latch scoping, and the control tables against fake binaries; the live guard is token-free (localhost mock) and runs by default wherever `opencode2`, `tmux`, `python3`, `node`, and `curl` are installed, capability-skipping elsewhere.
+The portable suite pins binary selection, the platform-only launch line, the isolated config dir, model refusals, the secondmate refusal, the generated plugin's latch scoping, and the control tables against fake binaries; the live guard is token-free (localhost mock) and runs by default wherever `opencode2`, `tmux`, `python3`, `node`, and `curl` are installed, capability-skipping elsewhere.
 
 ## Not verified
 

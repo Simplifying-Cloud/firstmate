@@ -1,6 +1,7 @@
 # OpenCode
 
 Verified on 2026-06-11 across versions 1.15.7 through 1.17.6, with busy-queue behavior re-verified on 2026-07-20 using 1.18.4.
+`opencode2` (OpenCode 2.x, the separate @opencode/cli package) is verified on 2026-10-17 on 2.0.32 for crewmate and scout launches only; the "OpenCode 2.x" section below owns its differences.
 
 ## Operating facts
 
@@ -43,3 +44,27 @@ On native Windows, the operational-input adapter runs its Bash helper through `b
 
 The companion `.opencode/plugins/fm-primary-watch-arm.js` owns normal TUI watcher supervision, wakes it with `client.session.promptAsync`, and coordinates with the guard before a blind-turn follow-up.
 The PreToolUse-equivalent watcher-arm seatbelt blocks by throwing from `tool.execute.before`.
+
+## OpenCode 2.x (harness `opencode2`)
+
+Verified live on 2026-10-17 against `opencode v2.0.32` (installed as `~/.local/bin/opencode` and `~/.local/bin/opencode2`, PATH-shadowed by a 1.18.31 `~/.opencode/bin/opencode`).
+`opencode2` is a CREWMATE and SCOUT adapter only: no 2.x primary supervision integration is verified, so a secondmate on it is refused, and `bin/fm-harness.sh` detection still answers the `opencode` family for both majors because the 2.x process comm is `opencode` too.
+
+| Fact | Value |
+|---|---|
+| Binary | Selected by `bin/fm-opencode2-lib.sh` without PATH-order dependence: the `config/opencode2-binary` pin wins (and refuses on anything not answering `opencode v2.` for `--version`), then `opencode2` on PATH (a name 1.x never installs), then the concrete `~/.local/bin` candidates, every one gated on that live version answer. |
+| Platform traffic | Every model request must go through the governed platform (default `https://ai.simplifying.cloud`, overridable via `config/opencode2-platform`). The launch discovers the org config's providers whose `baseURL` routes through the origin (`<binary> debug config`), and `OPENCODE_CONFIG_CONTENT` carries `policies` denying `provider.use` for `*` and allowing exactly those providers. Selecting any other model (the operator's personal `openai/*`, `minimax-coding-plan/*`, `zai-coding-plan/*`, `ollama/*`) is refused locally with `Error: Model unavailable: <model>`, and `fm-spawn` refuses a `--model` outside the discovered set before launch. |
+| Server isolation | `--standalone` is load-bearing: without it the worker joins the operator's per-user background server, which was started with the operator's environment and ignores this launch's `OPENCODE_CONFIG_CONTENT`, so the policies, model, and project plugin would silently not apply. With it the worker gets a private server inheriting exactly the launch environment. |
+| Config isolation | `OPENCODE_CONFIG_DIR` points at a firstmate-owned per-task empty directory, so the operator's global `~/.config/opencode` (their own plugins, MCP servers, theme) does not load; the org config and the credential store live in the data directory outside it and still reach the worker. |
+| Busy state | The Firstmate-owned plugin at `.opencode/plugins/fm-busy-state.js` in the 2.x DEFAULT-EXPORT form (`{ id, setup }`): `session.execution.started` is busy and `succeeded`, `failed`, and `interrupted` all close the turn, so a manual cancel can never leave a stale busy record. `setup` must return; one that never returns blocks the whole location and every API call then fails with `Location plugins did not finish activating` after five seconds. 2.0.32 never publishes the legacy `session.status`/`session.idle` events (they exist only in the API schema), so those arms in the plugin are forward-compat no-ops. Provider errors surface as `session.retry.scheduled` while the execution stays open. |
+| Exit command | `/exit`. Two Ctrl-C presses also exit the TUI (verified; useful as a wedge fallback). |
+| Interrupt | Double Escape with an ARMED second press: the first press renders `esc again to interrupt` in the footer, and the second press must follow promptly inside that window (verified: 0.5s gap interrupted with `session.execution.interrupted reason=user`; 1.5s re-armed without firing). A wide gap can also open an integrations dialog on an idle pane; Escape closes it. |
+| Resume | Relaunch with `--continue` resumes the most recent session for the directory, and unlike 1.x the 2.x `--continue --prompt` combination auto-submits the prompt (verified: the busy record opened and settled without any manual send). |
+| Model | The 2.x TUI has no `--model` flag; the resolved model rides `OPENCODE_CONFIG_CONTENT` as `"model": "provider/model"` (verified as the session's model in `session.created`). |
+| Effort | No platform model exposes a variant list on 2.0.32 (`opencode debug config` shows capabilities and limits only), so the effort axis is recorded in task metadata but omitted from the launch (record-and-omit). |
+| Trust dialog | None observed on any fresh worktree launch. |
+| Marker | None, same as 1.x; ancestry through the `opencode` comm covers it. |
+| Busy-queued Enter | Same shape as 1.18.4: while mid-turn the composer keeps the typed text and Enter enqueues the message (`session.inbox.enqueued` with `delivery: steer`), delivered when the turn ends. |
+| Auto-update | `OPENCODE_DISABLE_AUTOUPDATE=1` in the launch keeps a background self-upgrade from exiting the worker mid-task (log line `update check skipped reason=disabled`). |
+
+Sandbox placement is refused: a sandbox host has none of the operator's OpenCode 2.x platform sign-in, so its org providers cannot resolve there (`docs/remote-sandboxes.md`).

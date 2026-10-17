@@ -883,6 +883,16 @@ Changing this pin affects the next secondmate spawn or control-plane relaunch; t
 An explicit harness argument to `fm-spawn.sh` still overrides either config file for that spawn only.
 An explicit `--model` or `--effort` overrides the matching token from `config/secondmate-harness`; for a local route, an explicit harness or raw launch command starts with clean model and effort defaults unless those flags are also passed.
 
+### OpenCode 2.x workers (opencode2-binary, opencode2-platform)
+
+The `opencode2` adapter launches crewmates and scouts on OpenCode 2.x with every model request routed through the governed platform; [`fm-opencode2-lib.sh`](../bin/fm-opencode2-lib.sh) owns selection and discovery, and the harness reference owns the verified operating facts.
+
+`config/opencode2-binary` is a local, gitignored file holding one absolute path to the OpenCode 2.x executable.
+When present it must name an executable whose `--version` answers `opencode v2.`, otherwise the spawn refuses; when absent, `opencode2` on PATH and then the concrete `~/.local/bin` candidates are tried, each gated on the same live version answer, so selection never depends on PATH order between a 1.x and a 2.x `opencode`.
+
+`config/opencode2-platform` is a local, gitignored file holding the platform origin every worker provider must route through, defaulting to `https://ai.simplifying.cloud`.
+At spawn, the org config's providers whose `baseURL` routes through the origin are discovered and every other provider is denied, and a `--model` outside the discovered set refuses the spawn.
+
 Remote secondmate routes accept verified harness adapters only and reject raw launch commands.
 When `config/crew-dispatch.json` exists, crewmate and scout spawns require an explicit resolved harness instead of automatically falling back to `config/crew-harness`.
 

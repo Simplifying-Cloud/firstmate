@@ -14,7 +14,7 @@
 #       the old gen are rejected as stale from then on.
 #
 #   apply <state-dir> <id> <busy|idle|unknown> (--gen G | --current-gen)
-#         --source S --event E
+#         --source S --event E [--touch-turnend]
 #       Append one lifecycle event: validate the gen against the armed
 #       sidecar, advance seq under the lock, atomically replace the record.
 #       Adapter wiring passes the exact --gen embedded at arm time, so a
@@ -22,6 +22,13 @@
 #       Claude fm-send --key Escape path (fm-interrupt) and firstmate recovery
 #       paths (fm-recovery) may pass --current-gen to bind to the incarnation
 #       armed right now.
+#       --touch-turnend (apply only) also touches state/<id>.turn-ended as
+#       part of the same accepted event, under the same writer lock, after
+#       the record replace. A refused event - stale gen, retired task, lock
+#       timeout - touches nothing, so an adapter settle racing teardown is
+#       refused whole: teardown retires the busy contract before removing the
+#       notification, and a late settle can never recreate the notification
+#       for a torn-down task.
 #
 #   progress <state-dir> <id> --gen G
 #       Refresh state/<id>.progress for observed native-harness activity under
@@ -44,7 +51,7 @@ usage() {
   cat >&2 <<'EOF'
 usage:
   fm-busy-event.sh arm <state-dir> <id> [--state busy|idle|unknown] [--source S] [--event E]
-  fm-busy-event.sh apply <state-dir> <id> <busy|idle|unknown> (--gen G | --current-gen) --source S --event E
+  fm-busy-event.sh apply <state-dir> <id> <busy|idle|unknown> (--gen G | --current-gen) --source S --event E [--touch-turnend]
   fm-busy-event.sh progress <state-dir> <id> --gen G
   fm-busy-event.sh retire <state-dir> <id> (--gen G | --current-gen)
 See the header comment for the full contract.
@@ -74,6 +81,7 @@ GEN=
 USE_CURRENT_GEN=0
 SOURCE=
 EVENT=
+TOUCH_TURNEND=0
 if [ "$CMD" = apply ]; then
   NEW_STATE=${1:-}
   case "$NEW_STATE" in busy|idle|unknown) shift ;; *) usage ;; esac
@@ -89,6 +97,11 @@ while [ $# -gt 0 ]; do
     --current-gen) USE_CURRENT_GEN=1; shift ;;
     --source) SOURCE=${2:-}; shift 2 || usage ;;
     --event) EVENT=${2:-}; shift 2 || usage ;;
+    --touch-turnend)
+      [ "$CMD" = apply ] || usage
+      TOUCH_TURNEND=1
+      shift
+      ;;
     *) usage ;;
   esac
 done
@@ -244,6 +257,14 @@ write_record "$GEN" $((OLD_SEQ + 1)) || {
   echo "error: record write failed for $ID" >&2
   exit 1
 }
+if [ "$TOUCH_TURNEND" = 1 ]; then
+  touch "$STATE/$ID.turn-ended" || {
+    lock_release
+    umask "$old_umask"
+    echo "error: turn-ended notification touch failed for $ID" >&2
+    exit 1
+  }
+fi
 lock_release
 umask "$old_umask"
 exit 0

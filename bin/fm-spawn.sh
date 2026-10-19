@@ -5414,18 +5414,20 @@ EOF
 // main session is already busy) and ignores other sessions' events until the
 // latched session settles, so a child's completion can never clear the
 // worker's busy state. The latched settle touch stays the watcher's wake
-// NOTIFICATION, never current-state truth.
+// NOTIFICATION, never current-state truth, and rides the same gen-guarded
+// writer call (fm-busy-event.sh --touch-turnend): teardown retires the busy
+// contract before removing the notification, so a final settle racing
+// teardown - such as the last execution cycle on TUI exit - is refused whole
+// and cannot recreate the notification for a torn-down task.
 import { execFile } from "node:child_process";
-const busyEvent = (state, event) =>
+const busyEvent = (state, event, touchTurnend) =>
   new Promise((resolve) => {
-    execFile("$FM_ROOT/bin/fm-busy-event.sh", [
+    const args = [
       "apply", "$STATE_REAL", "$ID", state,
       "--gen", "$BUSY_GEN", "--source", "opencode-plugin", "--event", event,
-    ], () => resolve());
-  });
-const touchTurnend = () =>
-  new Promise((resolve) => {
-    execFile("touch", ["$TURNEND"], () => resolve());
+    ];
+    if (touchTurnend) args.push("--touch-turnend");
+    execFile("$FM_ROOT/bin/fm-busy-event.sh", args, () => resolve());
   });
 export default {
   id: "fm-busy-state",
@@ -5443,8 +5445,7 @@ export default {
           } else if (event.type === "session.execution.succeeded" || event.type === "session.execution.failed" || event.type === "session.execution.interrupted") {
             if (sessionID === activeSession) {
               activeSession = null;
-              await busyEvent("idle", "execution-" + event.type.split(".").pop());
-              await touchTurnend();
+              await busyEvent("idle", "execution-" + event.type.split(".").pop(), true);
             }
           }
         }

@@ -157,20 +157,17 @@
 # token before the old one expires. stdin carries exactly one gh_token_b64= line,
 # at most 64 KiB, validated as provision validates that field. It is refused
 # for a retired task, stores the token as provision does, and restores the
-# previous gh configuration if storing fails. After storage succeeds it revokes
-# the predecessor, retaining unconfirmed credentials as private gh configs in
-# the gh directory's fm-predecessors/<fingerprint>/hosts.yml until retirement.
-# state/task-provision.journal records results without values. Prints
-# refresh=stored, task_id, predecessor revoke result/fingerprint pairs, then
-# the current gh_token_fp for the primary to compare with the token it sent.
-# Replaying the current token never revokes it.
+# previous gh configuration if storing fails. state/task-provision.journal
+# records the refresh without the value. Prints refresh=stored, task_id, and
+# gh_token_fp for the primary to compare with the token it sent. The supervisor
+# owns all minted-token retention and predecessor revocation in its broker.
 #
 # retire runs this host's fm-teardown.sh for a ship, landed-work test and all,
 # and relays its output and status unchanged, so a refusal reaches the
 # primary's teardown as written; --force passes through only as the captain's
 # explicit discard. A scout is refused, because its worktree is scratch and its
 # completion gate runs in the supervising home. After a passing teardown, a
-# stored GitHub App installation token and retained predecessors are revoked with
+# stored GitHub App installation token (a ghs_ token) is revoked with
 # `gh api --method DELETE /installation/token`, and any other token is left
 # alone. For a token it tried, retire then prints gh_token_revoke=revoked,
 # invalid (GitHub already refused it), expired, or failed, with gh_token_fp;
@@ -1046,7 +1043,7 @@ cmd_brief_update() {
 }
 
 cmd_cred_refresh() {
-  local id=$1 bytes line value='' seen=0 fp predecessor='' old_fp auth_dir
+  local id=$1 bytes line value='' seen=0 fp
   [ ! -e "$TARGET_HOME/state/$id.retired" ] && [ ! -L "$TARGET_HOME/state/$id.retired" ] \
     || die "task $id is retired on this host, so its GitHub token is never refreshed"
   umask 077
@@ -1071,22 +1068,6 @@ cmd_cred_refresh() {
   [ "$seen" -eq 1 ] || die "the credential refresh has no gh_token_b64 line"
   gh_token_stage "$value" "the credential refresh's"
   value=
-  auth_dir=${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}
-  if grep -q 'credential .*gh_token=' "$TARGET_HOME/state/task-provision.journal"; then
-    env -u GH_TOKEN -u GITHUB_TOKEN "$GH_BIN" auth token --hostname github.com \
-      > "$PROVISION_TMP/previous-token" 2>/dev/null || die "cannot read the previous GitHub credential"
-    tr -d '\n' < "$PROVISION_TMP/previous-token" > "$PROVISION_TMP/previous-bare"
-    if [ "$(head -c 4 "$PROVISION_TMP/previous-bare")" = ghs_ ] \
-      && ! cmp -s "$PROVISION_TMP/previous-bare" "$PROVISION_TMP/gh-token"; then
-      old_fp=$(sha256_file "$PROVISION_TMP/previous-bare" | cut -c1-12)
-      predecessor="$auth_dir/fm-predecessors/$old_fp"
-      [ ! -L "$auth_dir" ] && [ ! -L "$auth_dir/fm-predecessors" ] && [ ! -L "$predecessor" ] \
-        || die "unsafe predecessor credential storage"
-      mkdir -p -m 700 "$predecessor" || die "cannot retain the previous GitHub credential"
-      write_private_file "$auth_dir/hosts.yml" "$predecessor/hosts.yml" \
-        || die "cannot retain the previous GitHub credential"
-    fi
-  fi
   gh_auth_store
   PROVISION_PUBLISHED=1
   fp=$(sha256_file "$PROVISION_TMP/gh-token" | cut -c1-12)
@@ -1095,11 +1076,6 @@ cmd_cred_refresh() {
   printf 'schema=%s\n' "$SCHEMA"
   printf 'refresh=stored\n'
   printf 'task_id=%s\n' "$id"
-  if [ -n "$predecessor" ]; then
-    if gh_revoke_stored "$id" "$predecessor" < /dev/null; then
-      rm -rf -- "$predecessor"
-    fi
-  fi
   printf 'gh_token_fp=%s\n' "$fp"
 }
 
@@ -1148,28 +1124,17 @@ gh_revoke_stored() {
 }
 
 retire_revoke_gh_token() {
-  local id=$1 auth_dir config records report failed=0 rc
+  local id=$1 auth_dir report rc=0
   grep -q 'credential .*gh_token=' "$TARGET_HOME/state/task-provision.journal" || return 0
-  records=$(cat)
   auth_dir=${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}
-  : > "$TARGET_HOME/state/$id.gh-token-revoke"
-  for config in "$auth_dir"/fm-predecessors/* "$auth_dir"; do
-    [ "$config" = "$auth_dir" ] || [ -d "$config" ] || continue
-    rc=0
-    report=$(gh_revoke_stored "$id" "$config" <<< "$records") || rc=$?
-    if [ -n "$report" ]; then
-      printf '%s\n' "$report"
-      printf '%s\n' "$report" | awk -F= '
-        $1 == "gh_token_revoke" { result=$2 }
-        $1 == "gh_token_fp" { print result, $2 }' >> "$TARGET_HOME/state/$id.gh-token-revoke"
-    fi
-    if [ "$rc" -ne 0 ]; then
-      failed=1
-    elif [ "$config" != "$auth_dir" ]; then
-      rm -rf -- "$config"
-    fi
-  done
-  return "$failed"
+  report=$(gh_revoke_stored "$id" "$auth_dir") || rc=$?
+  if [ -n "$report" ]; then
+    printf '%s\n' "$report"
+    printf '%s\n' "$report" | awk -F= '
+      $1 == "gh_token_revoke" { result=$2 }
+      $1 == "gh_token_fp" { print result, $2 }' > "$TARGET_HOME/state/$id.gh-token-revoke"
+  fi
+  return "$rc"
 }
 
 retire_report_revoke() { # <result> <fp|->

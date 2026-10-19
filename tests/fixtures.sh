@@ -340,6 +340,9 @@ case "$method $path" in
       "$token" "$exp" "$("$jq" -c '.permissions' "$body")" "$full")"
     ;;
   "DELETE /installation/token")
+    if [ -f "$d/delete-status" ]; then
+      reply "$(cat "$d/delete-status")" '{"message":"Fixture revoke failure"}'
+    fi
     if listed "$d/minted" && ! listed "$d/revoked"; then
       printf '%s\n' "$cred" >> "$d/revoked"
       reply 204 ''

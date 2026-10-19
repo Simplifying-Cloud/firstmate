@@ -108,7 +108,6 @@ case "$*" in
   "auth token --hostname github.com") cat "$store/hosts.yml" ;;
   "api --method DELETE /installation/token --include")
     printf 'revoke\n' >> "$HOME/../gh.revokes"
-    tr -d '\n' < "$store/hosts.yml" | sha256sum | cut -c1-12 >> "$HOME/../gh.revoke-fps"
     code=$(cat "$HOME/../gh-revoke-status" 2>/dev/null || printf '204')
     printf 'HTTP/2.0 %s Fake\r\nContent-Length: 0\r\n\r\n' "$code"
     [ "$code" = 204 ] || exit 1
@@ -1100,51 +1099,6 @@ test_retire_without_credentials_or_gh() {
   assert_absent "$CASE/gh.revokes" "credential-free retirement never revokes"
 }
 
-test_refresh_retains_failed_predecessors_for_retirement() {
-  local out rc old_fp new_fp retained closure
-  for closure in revoked expired; do
-    new_case "predecessor-$closure"
-    write_manifest "$CASE/manifest" ship claude
-    manifest_set "$CASE/manifest" gh_token_b64 "gh_token_b64=$(printf '%s' "$APP_SECRET" | b64)"
-    run_control provision "$ID" < "$CASE/manifest" >/dev/null 2>&1 || fail "provision failed"
-    launch_ready
-    run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
-    printf 'bash\n' > "$TMUX_DIR/pane-command"
-    old_fp=$(token_fp "$APP_SECRET")
-    new_fp=$(token_fp "$REFRESH_SECRET")
-    retained="$ACCOUNT_HOME/.config/gh/fm-predecessors/$old_fp/hosts.yml"
-    printf '502\n' > "$CASE/gh-revoke-status"
-    refresh_input "$REFRESH_SECRET" > "$CASE/refresh"
-    out=$(run_control cred-refresh "$ID" < "$CASE/refresh" 2>&1); rc=$?
-    expect_code 0 "$rc" "delivery succeeds despite a failed predecessor revoke"$'\n'"$out"
-    assert_contains "$out" "gh_token_revoke=failed"$'\n'"gh_token_fp=$old_fp" "refresh reports predecessor failure"
-    assert_equals "$REFRESH_SECRET" "$(cat "$ACCOUNT_HOME/.config/gh/hosts.yml")" "new token is installed"
-    assert_equals "$APP_SECRET" "$(cat "$retained")" "failed predecessor is retained"
-    assert_equals 600 "$(mode_of "$retained")" "retained credentials are private"
-    assert_equals "$old_fp" "$(cat "$CASE/gh.revoke-fps")" "refresh revokes only its predecessor"
-    run_control cred-refresh "$ID" < "$CASE/refresh" >/dev/null 2>&1 || fail "refresh replay failed"
-    assert_equals 1 "$(grep -c . "$CASE/gh.revokes")" "refresh replay does not revoke the current token"
-    out=$(run_control retire "$ID" 2>&1); rc=$?
-    expect_code 1 "$rc" "retirement waits for outstanding credentials"
-    assert_absent "$TASK_HOME/state/$ID.retired" "failed predecessors keep retirement open"
-    if [ "$closure" = expired ]; then
-      printf '1 mint github task=%s fp=%s expires=2000-01-01T00:00:00Z\n' "$ID" "$old_fp" > "$CASE/ledger"
-      printf '1 mint github task=%s fp=%s expires=2099-01-01T00:00:00Z\n' "$ID" "$new_fp" >> "$CASE/ledger"
-      out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
-      expect_code 1 "$rc" "predecessor expiry does not expire the current token"
-      assert_contains "$out" "gh_token_revoke=expired"$'\n'"gh_token_fp=$old_fp" "each token uses its own expiry"
-      assert_absent "$retained" "expired predecessor storage is removed"
-    fi
-    printf '204\n' > "$CASE/gh-revoke-status"
-    out=$(run_control retire "$ID" 2>&1); rc=$?
-    expect_code 0 "$rc" "confirmed revokes finish retirement"$'\n'"$out"
-    assert_absent "$retained" "closed predecessor storage is removed"
-    assert_present "$TASK_HOME/state/$ID.retired" "all credentials are closed before retirement"
-    assert_no_secret_text "refresh and retirement output" "$out"
-    assert_no_secret_files "credential journals and command arguments" "$TASK_HOME" "$CASE/gh.argv" "$CASE/gh.environment"
-  done
-}
-
 test_dispatch_refuses_malformed_calls() {
   local out rc
   new_case dispatch
@@ -1179,6 +1133,5 @@ test_retire_runs_the_host_teardown_for_ships_only
 test_cred_refresh_replaces_the_stored_token
 test_retire_revokes_a_stored_app_token
 test_retire_without_credentials_or_gh
-test_refresh_retains_failed_predecessors_for_retirement
 test_dispatch_refuses_malformed_calls
 echo "ALL TESTS PASSED"

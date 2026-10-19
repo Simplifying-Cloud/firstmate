@@ -92,7 +92,7 @@ Each effective `FM_HOME` contains private operational directories.
 - Private secondmate config-reread generations with their retry and quarantine state.
 - Per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`).
 - Parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
-- The append-only credential ledger `state/cred-ledger`, which records minted credentials without their values (`bin/fm-cred-broker.sh`).
+- The append-only credential ledger `state/cred-ledger` and protected per-task pending credentials under `state/cred-pending/` (`bin/fm-cred-broker.sh`).
 
 `config/` holds local gitignored operating choices, including explicit extension bindings under `config/extensions.d/`.
 

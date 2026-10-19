@@ -3616,6 +3616,11 @@ sandbox_task_teardown() {
         || echo "error: sandbox task $ID's status mirror could not be re-armed ($SANDBOX_MIRROR_ERROR); rerun bin/fm-procevent-remote-reply.sh arm $ID" >&2
       exit "$rc"
     fi
+    if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$SCRIPT_DIR/fm-cred-broker.sh" github retire --task "$ID"; then
+      echo "REFUSED: sandbox task $ID still has pending GitHub credentials; keeping its sandbox and task record for retry" >&2
+      exit 1
+    fi
   fi
 
   # Pass. The destroy-pending record comes first, so no later failure can leave

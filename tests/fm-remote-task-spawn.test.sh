@@ -447,10 +447,16 @@ assert_no_secret_text() { # <label> <text>
 }
 
 assert_no_secret_files() { # <label> <path...>
-  local label=$1 hit
+  local label=$1 hit path
   shift
   hit=$(grep -rlF -e "$GH_SECRET" -e "$OTHER_GH_SECRET" -e "$PI_SECRET" -e "$OTHER_PI_SECRET" -e "$APP_TOKEN_MARK" "$@" 2>/dev/null || true)
-  [ -z "$hit" ] || fail "$label holds a credential value: $hit"
+  while IFS= read -r path; do
+    case "$path" in
+      "$PRIMARY/state/cred-pending/"*) assert_equals 600 "$(stat -c %a "$path" 2>/dev/null || stat -f %Lp "$path")" "pending credentials are private" ;;
+      '') ;;
+      *) fail "$label holds a credential value: $path" ;;
+    esac
+  done <<< "$hit"
 }
 
 # Every place this run's output, records, logs, and argv could carry a secret.

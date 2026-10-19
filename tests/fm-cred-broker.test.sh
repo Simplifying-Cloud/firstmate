@@ -65,13 +65,6 @@ case "$*" in
     cat > "$store/hosts.yml"
     printf 'git_protocol: https\n' > "$store/config.yml"
     ;;
-  "auth token --hostname github.com") cat "$store/hosts.yml" ;;
-  "api --method DELETE /installation/token --include")
-    cat "$store/hosts.yml" >> "$FM_FAKE_GITHUB_DIR/revoked"
-    printf '\n' >> "$FM_FAKE_GITHUB_DIR/revoked"
-    printf 'DELETE /installation/token 204\n' >> "$FM_FAKE_GITHUB_DIR/calls.log"
-    printf 'HTTP/2.0 204 No Content\r\n\r\n'
-    ;;
   *) exit 1 ;;
 esac
 SH
@@ -187,11 +180,17 @@ deletes() { calls DELETE; }
 
 # No minted token outside the fake API's own records and the host's gh store.
 assert_no_token_anywhere() { # <label>
-  local hit
+  local hit path
   case "$OUT$ERR" in *"ghs_$TAG"*) fail "$1: the broker's output holds a token" ;; esac
   hit=$(grep -rlF "ghs_$TAG" "$HOME_DIR" "$CASE/tmp" "$CASE/ssh.log" "$GH_DIR/argv.log" "$GH_DIR/calls.log" \
     ${HOST_HOME:+"$HOST_HOME"} 2>/dev/null || true)
-  [ -z "$hit" ] || fail "$1: a token value was written to $hit"
+  while IFS= read -r path; do
+    case "$path" in
+      "$HOME_DIR/state/cred-pending/"*) assert_equals 600 "$(mode_of "$path")" "pending token storage is private" ;;
+      '') ;;
+      *) fail "$1: a token value was written to $path" ;;
+    esac
+  done <<< "$hit"
   [ -z "$(ls -A "$CASE/tmp" 2>/dev/null)" ] || fail "$1: the broker left private state in $CASE/tmp: $(ls -A "$CASE/tmp")"
 }
 
@@ -223,6 +222,8 @@ test_mint_writes_a_private_token_and_a_valueless_ledger_line() {
   assert_equals 600 "$(mode_of "$CASE/out/t.token")" "the token file is private"
   minted_token 1 "$CASE/expected.token"
   cmp -s "$CASE/expected.token" "$CASE/out/t.token" || fail "the token file does not hold exactly the minted token"
+  assert_equals 1 "$(pending_count t-mint)" "mint retains a supervisor copy before delivery"
+  assert_pending_private
   assert_equals 520 "$(wc -c < "$CASE/out/t.token" | tr -d ' ')" "the stateless-format token is written whole"
 
   fp=$(fp_of "$CASE/out/t.token")
@@ -387,7 +388,7 @@ test_api_refusals_and_a_repository_mismatch() {
   printf 'mismatch\n' > "$GH_DIR/mode"
   run_broker github mint --task t-api --repo acme/alpha --access write --out "$CASE/out/a.token"
   [ "$RC" -ne 0 ] || fail "a token for another repository was accepted"
-  assert_contains "$ERR" "whose repositories are not exactly acme/alpha, so it was revoked" "a repository mismatch is refused"
+  assert_contains "$ERR" "whose repositories are not exactly acme/alpha; cleanup revocation was attempted" "a repository mismatch is refused"
   assert_absent "$CASE/out/a.token" "a mismatched token is never written"
   assert_equals "DELETE /installation/token 204" "$(tail -n 1 "$GH_DIR/calls.log")" "the mismatched token is revoked at once"
   assert_equals 1 "$(grep -c . "$GH_DIR/revoked")" "exactly the mismatched token is revoked"
@@ -516,6 +517,21 @@ refresh_due() { # [env assignments...]; one refresh-due pass
   ERR=$(cat "$CASE/broker.err")
 }
 
+pending_count() {
+  find "$HOME_DIR/state/cred-pending/$1" -type f | wc -l | tr -d ' '
+}
+
+assert_pending_private() {
+  local entry
+  assert_equals 700 "$(mode_of "$HOME_DIR/state/cred-pending")" "pending credentials have a private root"
+  for entry in "$HOME_DIR/state/cred-pending"/*; do
+    assert_equals 700 "$(mode_of "$entry")" "each task has private pending storage"
+  done
+  while IFS= read -r entry; do
+    assert_equals 600 "$(mode_of "$entry")" "each pending credential is private"
+  done < <(find "$HOME_DIR/state/cred-pending" -type f)
+}
+
 queued_keys() { awk -F '\t' '$3 == "check" { print $4 }' "$HOME_DIR/state/.wake-queue" 2>/dev/null; }
 
 test_refresh_due_replaces_an_expiring_token_on_its_host() {
@@ -543,7 +559,7 @@ test_refresh_due_replaces_an_expiring_token_on_its_host() {
   grep -q ' credential refresh gh_token=gh/github.com$' "$HOST_HOME/state/task-provision.journal" \
     || fail "the host journals the refresh"
   assert_equals 1 "$(deletes)" "delivery revokes the predecessor"
-  assert_contains "$(ledger_line 4)" "fp=$(fp_of "$CASE/out/t-ref.launch") result=revoked via=host" "the predecessor revoke is ledgered"
+  assert_contains "$(ledger_line 4)" "fp=$(fp_of "$CASE/out/t-ref.launch") result=revoked reason=superseded" "the predecessor revoke is ledgered"
   run_broker github revoke --token-file "$CASE/out/t-ref.launch"
   assert_contains "$OUT" 'revoke=invalid' "the predecessor no longer authenticates"
 
@@ -593,7 +609,7 @@ test_refresh_failure_wakes_once_and_retries() {
   refresh_due
   expect_code 0 "$RC" "a failed refresh is reported, not an error"$'\n'"$ERR"
   out1=$OUT
-  assert_contains "$OUT" "check: sandbox t-fail credential refresh failed: the sandbox host refused the new token (exit 1), so it was revoked; its current GitHub token expires at" \
+  assert_contains "$OUT" "check: sandbox t-fail credential refresh failed: the sandbox host refused the new token (exit 1); cleanup revocation was attempted; its current GitHub token expires at" \
     "the failure names the task, the reason, and the expiry"
   assert_equals 1 "$(printf '%s\n' "$OUT" | grep -c .)" "one failure prints one reason"
   assert_equals "cred-refresh-t-fail-$fp1" "$(queued_keys)" "one keyed check wake is queued for the current token"
@@ -626,7 +642,7 @@ test_refresh_failure_wakes_once_and_retries() {
   pass "a failed refresh revokes its token, wakes once per current token, retries after a wait, and recovers"
 }
 
-test_unknown_delivery_keeps_the_token() {
+test_unknown_delivery_revokes_the_token() {
   local fp1
   new_case unknown
   sandbox_task t-lost
@@ -637,7 +653,8 @@ test_unknown_delivery_keeps_the_token() {
   assert_contains "$OUT" "check: sandbox t-lost credential refresh failed: SSH exit 255: the sandbox host could not be reached" \
     "the unreachable host is named"
   assert_equals "cred-refresh-t-lost-$fp1" "$(queued_keys)" "the unreachable host queues the token's wake"
-  assert_equals 0 "$(deletes)" "a token the host may hold is never revoked"
+  assert_equals 1 "$(deletes)" "an unknown delivery immediately attempts revocation"
+  assert_equals 1 "$(pending_count t-lost)" "only the launch credential remains pending"
   assert_contains "$(tail -n 1 "$LEDGER")" "refresh github task=t-lost result=unknown reason=unreachable alerted=yes fp=" \
     "an unknown delivery is recorded as unknown"
 
@@ -647,7 +664,7 @@ test_unknown_delivery_keeps_the_token() {
   refresh_due
   assert_equals 2 "$(posts)" "a record that no longer resolves to a sandbox route is never refreshed"
   assert_no_token_anywhere "an unknown delivery"
-  pass "an unconfirmed delivery keeps its token, wakes once, and an unresolvable record is skipped"
+  pass "an unconfirmed delivery revokes its token, wakes once, and an unresolvable record is skipped"
 }
 
 test_failed_revoke_still_refreshes() {
@@ -710,6 +727,93 @@ SH
   assert_equals '' "$OUT" "the next pass does not repeat the wake"
 }
 
+test_pending_set_gates_retirement() {
+  local delivery fp
+  for delivery in unreachable refused superseded; do
+    new_case "pending-$delivery"
+    sandbox_task t-pending
+    launch_mint t-pending write 600
+    fp=$(fp_of "$CASE/out/t-pending.launch")
+    printf '502\n' > "$GH_DIR/delete-status"
+    if [ "$delivery" = refused ]; then
+      : > "$HOST_DIR/gh-fail"
+      refresh_due
+    elif [ "$delivery" = unreachable ]; then
+      refresh_due FM_FAKE_SSH_MODE=unreachable
+    else
+      refresh_due
+      assert_contains "$(tail -n 1 "$LEDGER")" "fp=$fp result=failed reason=superseded" "superseded credentials stay accountable"
+      assert_absent "$HOST_ACCOUNT/.config/gh/fm-predecessors" "the supervisor owns the sole pending set"
+    fi
+    assert_equals 1 "$(deletes)" "every failed or superseded delivery attempts cleanup"
+    assert_equals 2 "$(pending_count t-pending)" "unconfirmed cleanup retains both task credentials"
+    assert_pending_private
+    run_broker github retire --task t-pending
+    [ "$RC" -ne 0 ] || fail "retirement succeeded with live unresolved credentials"
+    assert_equals 2 "$(pending_count t-pending)" "failed retirement retains credentials for retry"
+    if [ "$delivery" = superseded ]; then
+      advance_clock 601
+      run_broker github retire --task t-pending
+      [ "$RC" -ne 0 ] || fail "one token's expiry closed a different live token"
+      assert_equals 1 "$(pending_count t-pending)" "only the expired predecessor is cleared"
+      assert_contains "$(cat "$LEDGER")" "fp=$fp result=expired reason=retire" "expiry is recorded separately from revoke"
+      advance_clock 3000
+    else
+      rm "$GH_DIR/delete-status"
+    fi
+    run_broker github retire --task t-pending
+    expect_code 0 "$RC" "retirement closes every remaining token"$'\n'"$ERR"
+    assert_equals 0 "$(pending_count t-pending)" "successful retirement leaves an empty set"
+    run_broker github retire --task t-pending
+    expect_code 0 "$RC" "retirement replay is idempotent"
+    assert_no_token_anywhere "pending retirement"
+  done
+  pass "unknown, refused, and superseded mints remain pending until revoked or individually expired"
+}
+
+test_interrupted_predecessor_cleanup_keeps_confirmed_delivery() {
+  local pid rc
+  new_case interrupted-cleanup
+  sandbox_task t-confirmed
+  launch_mint t-confirmed write 600
+  mv "$FAKEBIN/curl" "$FAKEBIN/curl-api"
+  cat > "$FAKEBIN/curl" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" --request DELETE "*)
+    if [ ! -f "$FM_FAKE_GITHUB_DIR/signalled" ]; then
+      : > "$FM_FAKE_GITHUB_DIR/signalled"
+      kill -TERM "$(cat "$FM_FAKE_GITHUB_DIR/broker-pid")"
+      exit 7
+    fi
+    ;;
+esac
+exec "$(dirname "$0")/curl-api" "$@"
+SH
+  chmod +x "$FAKEBIN/curl"
+  env -u FM_STATE_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_DATA_OVERRIDE -u FM_ROOT_OVERRIDE \
+    FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" TMPDIR="$CASE/tmp" \
+    FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_SSH_LOG="$CASE/ssh.log" FM_FAKE_HOST_BIN="$HOST_BIN" \
+    FM_FAKE_HOST_ACCOUNT="$HOST_ACCOUNT" FM_FAKE_HOST_TMP="$HOST_TMP" \
+    "$BROKER" github refresh-due > "$CASE/interrupted.out" 2> "$CASE/interrupted.err" &
+  pid=$!
+  echo "$pid" > "$GH_DIR/broker-pid"
+  wait "$pid"; rc=$?
+  mv "$FAKEBIN/curl-api" "$FAKEBIN/curl"
+  [ "$rc" -ne 0 ] || fail "the interrupted cleanup reported success"
+  assert_equals 2 "$(pending_count t-confirmed)" "both credentials remain protected after interrupted cleanup"
+  assert_equals 0 "$(deletes)" "interruption never revokes the confirmed replacement"
+  assert_absent "$HOME_DIR/state/.control-t-confirmed.lock" "interrupted cleanup releases its lock"
+  minted_token 2 "$CASE/current.token"
+  cmp -s "$CASE/current.token" "$HOST_ACCOUNT/.config/gh/hosts.yml" || fail "the confirmed replacement was lost"
+  refresh_due
+  assert_equals 2 "$(posts)" "the confirmed fresh token is not replaced again"
+  run_broker github retire --task t-confirmed
+  expect_code 0 "$RC" "retirement closes both protected credentials"
+  assert_equals 0 "$(pending_count t-confirmed)" "retirement leaves no interrupted credentials"
+  pass "interruption during predecessor cleanup preserves a confirmed replacement"
+}
+
 test_mint_writes_a_private_token_and_a_valueless_ledger_line
 test_write_access_requests_the_ship_set
 test_refuses_unsafe_keys_and_malformed_input
@@ -719,8 +823,10 @@ test_record_revoke_validates_the_host_report
 test_refresh_due_replaces_an_expiring_token_on_its_host
 test_refresh_skips_fresh_locked_retired_and_unminted_tasks
 test_refresh_failure_wakes_once_and_retries
-test_unknown_delivery_keeps_the_token
+test_unknown_delivery_revokes_the_token
 test_failed_revoke_still_refreshes
 test_refresh_budget_and_expiry_order
 test_interrupted_refresh_is_reported_once
+test_pending_set_gates_retirement
+test_interrupted_predecessor_cleanup_keeps_confirmed_delivery
 echo "ALL TESTS PASSED"

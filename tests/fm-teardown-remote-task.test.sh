@@ -495,7 +495,7 @@ test_landed_ship_destroys_exactly_once_after_its_records() {
 }
 
 test_landed_ship_records_its_hosts_app_token_revoke() {
-  local fp hit closure=${1:-revoked}
+  local fp hit closure=${1:-revoked} pending
   new_case "app-revoke-$closure"
   APP_TOKEN="ghs_TEARDOWNAPP${RUN_ID}$(printf 'Ab9_%.0s' $(seq 1 100))"
   (umask 077; printf '%s\n' "$APP_TOKEN" > "$CREDS/app-$RUN_ID.token")
@@ -518,8 +518,30 @@ test_landed_ship_records_its_hosts_app_token_revoke() {
   else
     printf '204\n' > "$HOST_DIR/gh-revoke-status"
   fi
+  if [ "$closure" = revoked ]; then
+    pending="$PRIMARY/state/cred-pending/$ID/token.leftover"
+    (umask 077; mkdir -p "$(dirname "$pending")"; printf '%s\n' '{"token":"ghs_UNDELIVERED_REFRESH_FIXTURE","expires_at":"2099-01-01T00:00:00Z"}' > "$pending")
+    cat > "$LOCAL_BIN/curl" <<'SH'
+#!/usr/bin/env bash
+cat > /dev/null
+printf '502'
+SH
+    chmod +x "$LOCAL_BIN/curl"
+    run_teardown
+    [ "$RC" -ne 0 ] || fail "a live undelivered token allowed sandbox destruction"
+    assert_present "$HOST_HOME/state/$ID.retired" "the host completed its own retirement"
+    assert_present "$pending" "the supervisor retains the unresolved credential"
+    assert_equals 0 "$(destroy_calls)" "pending credentials prevent destruction after host retirement"
+    assert_present "$PRIMARY/state/$ID.meta" "pending credentials preserve the route for retry"
+    (umask 077; printf '%s\n' '{"token":"ghs_UNDELIVERED_REFRESH_FIXTURE","expires_at":"2000-01-01T00:00:00Z"}' > "$pending")
+  fi
   run_teardown
   expect_code 0 "$RC" "teardown of a landed sandbox ship"$'\n'"$OUT"
+  if [ "$closure" = revoked ]; then
+    assert_absent "$pending" "expiry clears the leftover before destruction"
+    assert_contains "$(cat "$PRIMARY/state/cred-ledger")" 'result=expired reason=retire' "the supervisor records expiry closure"
+    rm "$LOCAL_BIN/curl"
+  fi
   fp=$(printf '%s' "$APP_TOKEN" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-12)
   assert_equals 2 "$(grep -c . "$HOST_DIR/gh.revokes")" "the host retries an unconfirmed revoke"
   grep -Eq "^[0-9]+ revoke github task=$ID fp=$fp result=$closure via=host$" "$PRIMARY/state/cred-ledger" \

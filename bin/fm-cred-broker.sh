@@ -6,6 +6,7 @@
 #   fm-cred-broker.sh github mint --task <id> --repo <owner/name> --access read|write [--out <file>]
 #   fm-cred-broker.sh github revoke --token-file <file>
 #   fm-cred-broker.sh github refresh-due
+#   fm-cred-broker.sh github retire --task <id>
 #   fm-cred-broker.sh github record-revoke --task <id> --fp <fingerprint> --result revoked|invalid|expired|failed
 #
 # The one credential issued today is a GitHub App installation token for a
@@ -22,11 +23,15 @@
 # contents, pull_requests, and issues write with metadata, checks, statuses, and
 # actions read, plus workflows write only when config/github-app says
 # workflows=on. The token goes to --out (mode 0600, replaced atomically) or to
-# stdout, nowhere else. A mint is recorded before its token is handed out, and a
-# token that cannot be recorded or written is revoked before mint fails.
+# stdout, with its API response retained mode 0600 in the supervisor's protected
+# state/cred-pending/<task>/token.* set (directories mode 0700). The response is
+# captured there before validation or delivery so interrupted requests cannot
+# discard returned credentials. Each record holds the token and expires_at.
+# A mint is ledgered before delivery; a refused mint attempts cleanup revocation.
+# Confirmed revocation removes the matching pending record; failures retain it.
 #
 # revoke presents the token in --token-file, a private file holding it on one
-# line, to DELETE /installation/token: 204 is revoked, 401 is invalid (already
+# line, to DELETE /installation/token: 2xx is revoked, 401/404 is invalid (already
 # revoked or expired, so dead either way), and anything else fails non-zero.
 # It prints revoke=<result> and fp=<fingerprint>.
 #
@@ -38,9 +43,10 @@
 # (bin/fm-remote-task-control.sh), which stores it and confirms its fingerprint.
 # A task whose spawn or control lock is held is skipped for that pass, and the
 # control lock is held across the refresh. A success is silent. A host that
-# refuses leaves its stored token unchanged, so the new token is revoked; a
-# reply that never arrives (SSH exit 255, the 60-second delivery bound, or an
-# unconfirmed fingerprint) keeps it, because the host may hold it. Either
+# refuses or whose reply never arrives (SSH exit 255, the 60-second delivery
+# bound, or an unconfirmed fingerprint) triggers revocation of the new token.
+# A confirmed delivery triggers revocation of the predecessor. Unconfirmed
+# revocations remain in the same pending set for retirement. Either delivery
 # failure waits 300 seconds before retrying and queues one wake per current
 # token, `check: sandbox <id> credential refresh failed: ...`, printing that
 # reason on stdout for bin/fm-watch.sh to surface; later failures for the same
@@ -49,6 +55,10 @@
 #
 # record-revoke records the revoke a sandbox host's retire made with the task's
 # stored token, which bin/fm-teardown.sh relays from the host's report.
+# retire --task drains every pending mint for the task, recording revoked,
+# invalid, or expired before removal; failed or unreadable entries fail the
+# command and preserve the sandbox at the supervising teardown boundary.
+# Scouts and --force skip this gate and retain their expiry-only behavior.
 #
 # state/cred-ledger is append-only, created mode 0600, and holds one event per
 # line and never a credential value; fp is the first 12 hex digits of the
@@ -64,7 +74,8 @@
 # No JWT or token ever enters argv, the environment, a log, the ledger, or a
 # diagnostic: curl starts with --disable so no curlrc applies, and reads its
 # Authorization header from --config on stdin; tokens otherwise live only in a
-# private temporary directory removed on exit. Every refusal exits non-zero and
+# protected pending set and a private temporary directory removed on exit.
+# Every refusal exits non-zero and
 # names what was wrong, never a value.
 set -eu
 
@@ -74,6 +85,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 LEDGER="$STATE/cred-ledger"
+PENDING="$STATE/cred-pending"
 GITHUB_API=https://api.github.com
 GITHUB_API_VERSION=2022-11-28
 CURL_MAX_TIME=20
@@ -82,7 +94,7 @@ CURL_MAX_TIME=20
 . "$SCRIPT_DIR/fm-sandbox-credentials-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '5,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '5,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 LEAD_SECS=900
 RETRY_SECS=300
@@ -90,10 +102,16 @@ PUSH_TIMEOUT=60
 PASS_BUDGET=150
 ATTEMPT_BUDGET=105
 ACTIVE_TASK=
+DELIVERY_CONFIRMED=0
 
 refresh_interrupted() {
   if [ -n "$ACTIVE_TASK" ]; then
-    refresh_failed "$ACTIVE_TASK" unknown interrupted "the refresh attempt was interrupted"
+    if [ "$DELIVERY_CONFIRMED" -eq 0 ]; then
+      if [ -n "$MINT_PENDING" ] && [ -f "$MINT_PENDING" ]; then
+        revoke_undelivered "$ACTIVE_TASK"
+      fi
+      refresh_failed "$ACTIVE_TASK" unknown interrupted "the refresh attempt was interrupted"
+    fi
     fm_lock_release "$STATE/.control-$ACTIVE_TASK.lock" || true
   fi
   exit 1
@@ -153,6 +171,80 @@ ledger_append() { # <event fields...>; never a value
   (umask 077; printf '%s %s\n' "$(date +%s)" "$*" >> "$LEDGER")
 }
 
+pending_directory() {
+  local dir
+  [ -d "$STATE" ] && [ ! -L "$STATE" ] || return 1
+  for dir in "$PENDING" "$PENDING/$1"; do
+    [ ! -L "$dir" ] || return 1
+    if [ ! -d "$dir" ]; then
+      (umask 077; mkdir "$dir") || return 1
+    fi
+    chmod 700 "$dir" || return 1
+  done
+}
+
+pending_fingerprint() {
+  fm_sandbox_credential_file_ok "pending credential" "$1" || return 1
+  jq -e '.token | type == "string" and startswith("ghs_")' "$1" >/dev/null 2>&1 || return 1
+  jq -ej '.token | select(type == "string" and startswith("ghs_"))' "$1" 2>/dev/null \
+    | sha256_hex | cut -c1-12
+}
+
+pending_clear() {
+  local task=$1 fp=$2 entry found
+  [ ! -L "$PENDING" ] && [ ! -L "$PENDING/$task" ] || return 1
+  for entry in "$PENDING/$task"/*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    found=$(pending_fingerprint "$entry") || return 1
+    [ "$found" != "$fp" ] || rm -f -- "$entry" || return 1
+  done
+}
+
+pending_revoke() {
+  local task=$1 entry=$2 reason=$3 allow_expiry=${4:-no} fp expires epoch result=failed
+  fm_sandbox_credential_file_ok "pending credential" "$entry" || return 1
+  work_dir
+  jq -ej '.token | select(type == "string" and startswith("ghs_"))' "$entry" > "$WORK/pending-token" 2>/dev/null \
+    && token_ok "$WORK/pending-token" || return 1
+  fp=$(token_fp "$WORK/pending-token")
+  expires=$(jq -r '.expires_at // empty' "$entry" 2>/dev/null) || expires=
+  if [ "$allow_expiry" = yes ] && valid_iso "$expires" \
+    && epoch=$(fm_utc_iso_to_epoch "$expires") && [ "$epoch" -le "$(date +%s)" ]; then
+    result=expired
+  else
+    result=$(github_revoke "$WORK/pending-token") || result=failed
+  fi
+  ledger_append "revoke github task=$task fp=$fp result=$result reason=$reason" || return 1
+  [ "$result" != failed ] || return 1
+  rm -f -- "$entry"
+}
+
+pending_revoke_fp() {
+  local task=$1 fp=$2 entry found
+  [ ! -L "$PENDING" ] && [ ! -L "$PENDING/$task" ] || return 1
+  for entry in "$PENDING/$task"/*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    found=$(pending_fingerprint "$entry") || return 1
+    if [ "$found" = "$fp" ]; then
+      pending_revoke "$task" "$entry" superseded || return 1
+    fi
+  done
+}
+
+cmd_retire() {
+  local task entry failed=0
+  [ "$#" -eq 2 ] && [ "$1" = --task ] || usage
+  task=$2
+  valid_task "$task" || die "retire needs --task <id>"
+  [ ! -L "$PENDING" ] && [ ! -L "$PENDING/$task" ] || die "unsafe pending credential directory"
+  . "$SCRIPT_DIR/fm-classify-lib.sh"
+  for entry in "$PENDING/$task"/*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    pending_revoke "$task" "$entry" retire yes || failed=1
+  done
+  [ "$failed" -eq 0 ] || die "task $task still has unresolved GitHub credentials; retirement remains retryable"
+}
+
 # --- GitHub ---------------------------------------------------------------------
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
@@ -185,6 +277,7 @@ github_message() { # <response-file>; GitHub's own value-free error text
 MINT_FP=
 MINT_EXPIRES=
 MINT_DIAG=
+MINT_PENDING=
 
 mint_refused() { # <task> <repo> <access> <purpose> <reason> <diagnostic>
   MINT_DIAG=$6
@@ -199,6 +292,7 @@ github_mint() { # <task> <repo> <access> <purpose> <token-file>
   MINT_FP=
   MINT_EXPIRES=
   MINT_DIAG=
+  MINT_PENDING=
   if ! fm_github_app_config_load "$CONFIG/github-app"; then
     mint_refused "$task" "$repo" "$access" "$purpose" config "$FM_SANDBOX_CREDENTIAL_ERROR"
     return 1
@@ -219,18 +313,20 @@ github_mint() { # <task> <repo> <access> <purpose> <token-file>
     mint_refused "$task" "$repo" "$access" "$purpose" jwt "the GitHub App private key $FM_GITHUB_APP_KEY could not sign a JWT"
     return 1
   fi
-  rm -f -- "$WORK/response.json"
+  pending_directory "$task" || die "cannot protect pending credentials for task $task"
+  MINT_PENDING=$(umask 077; mktemp "$PENDING/$task/token.XXXXXX") \
+    || die "cannot retain the mint response for task $task"
   if ! status=$(printf 'header = "Authorization: Bearer %s"\n' "$jwt" \
       | github_call POST "/app/installations/$FM_GITHUB_APP_INSTALLATION_ID/access_tokens" \
-        "$WORK/request.json" "$WORK/response.json"); then
+        "$WORK/request.json" "$MINT_PENDING"); then
     jwt=
     mint_refused "$task" "$repo" "$access" "$purpose" unreachable "GitHub could not be reached to mint a token for $repo"
     return 1
   fi
   jwt=
   if [ "$status" != 201 ]; then
-    message=$(github_message "$WORK/response.json")
-    rm -f -- "$WORK/response.json"
+    message=$(github_message "$MINT_PENDING")
+    rm -f -- "$MINT_PENDING"
     case "$status" in ''|*[!0-9]*) status=unknown ;; esac
     mint_refused "$task" "$repo" "$access" "$purpose" "http-$status" \
       "GitHub refused an installation token for $repo (HTTP $status${message:+: $message})"
@@ -239,34 +335,29 @@ github_mint() { # <task> <repo> <access> <purpose> <token-file>
   # jq's diagnostics could quote the reply, which holds the token, so they are
   # discarded; the token itself goes only into the private token file.
   if ! jq -e '(.token | type == "string" and startswith("ghs_"))
-      and (.expires_at | type == "string")' "$WORK/response.json" >/dev/null 2>&1 \
-    || ! jq -j '.token' "$WORK/response.json" > "$out" 2>/dev/null \
+      and (.expires_at | type == "string")' "$MINT_PENDING" >/dev/null 2>&1 \
+    || ! jq -j '.token' "$MINT_PENDING" > "$out" 2>/dev/null \
     || ! token_ok "$out" \
-    || ! MINT_EXPIRES=$(jq -r '.expires_at' "$WORK/response.json" 2>/dev/null) \
+    || ! MINT_EXPIRES=$(jq -r '.expires_at' "$MINT_PENDING" 2>/dev/null) \
     || ! valid_iso "$MINT_EXPIRES"; then
-    rm -f -- "$WORK/response.json"
-    if [ -s "$out" ] && token_ok "$out"; then
-      github_revoke "$out" >/dev/null || true
-    fi
+    pending_revoke "$task" "$MINT_PENDING" malformed || true
     rm -f -- "$out"
     mint_refused "$task" "$repo" "$access" "$purpose" response "GitHub's installation token reply for $repo was malformed"
     return 1
   fi
   MINT_FP=$(token_fp "$out")
   if ! jq -e --arg repo "$repo" '[(.repositories // [])[] | .full_name | ascii_downcase] == [$repo | ascii_downcase]' \
-      "$WORK/response.json" >/dev/null 2>&1; then
-    rm -f -- "$WORK/response.json"
-    github_revoke "$out" >/dev/null || true
+      "$MINT_PENDING" >/dev/null 2>&1; then
+    pending_revoke "$task" "$MINT_PENDING" repository || true
     rm -f -- "$out"
     mint_refused "$task" "$repo" "$access" "$purpose" repository \
-      "GitHub minted a token whose repositories are not exactly $repo, so it was revoked"
+      "GitHub minted a token whose repositories are not exactly $repo; cleanup revocation was attempted"
     return 1
   fi
-  rm -f -- "$WORK/response.json"
   if ! ledger_append "mint github task=$task repo=$repo access=$access expires=$MINT_EXPIRES fp=$MINT_FP purpose=$purpose"; then
-    github_revoke "$out" >/dev/null || true
+    pending_revoke "$task" "$MINT_PENDING" ledger || true
     rm -f -- "$out"
-    MINT_DIAG="the mint for $repo could not be recorded in $LEDGER, so its token was revoked"
+    MINT_DIAG="the mint for $repo could not be recorded in $LEDGER; its credential remains tracked until revoked"
     return 1
   fi
 }
@@ -281,8 +372,8 @@ github_revoke() { # <token-file>
     status=none
   fi
   case "$status" in
-    204) printf 'revoked\n' ;;
-    401) printf 'invalid\n' ;;
+    2[0-9][0-9]) printf 'revoked\n' ;;
+    401|404) printf 'invalid\n' ;;
     *) printf 'failed\n'; return 1 ;;
   esac
 }
@@ -341,18 +432,16 @@ cmd_mint() {
       || ! cat -- "$WORK/token" > "$tmp" || ! chmod 600 "$tmp" || ! mv -f -- "$tmp" "$out"; then
       [ -z "${tmp:-}" ] || rm -f -- "$tmp"
       revoke_undelivered "$task"
-      die "the token for $repo could not be written to $out, so it was revoked"
+      die "the token for $repo could not be written to $out; cleanup revocation was attempted"
     fi
   elif ! { cat -- "$WORK/token" && printf '\n'; }; then
     revoke_undelivered "$task"
-    die "the token for $repo could not be written to stdout, so it was revoked"
+    die "the token for $repo could not be written to stdout; cleanup revocation was attempted"
   fi
 }
 
 revoke_undelivered() { # <task>; revokes and records $WORK/token
-  local result
-  result=$(github_revoke "$WORK/token") || true
-  ledger_append "revoke github task=$1 fp=$MINT_FP result=$result reason=undelivered" || true
+  pending_revoke "$1" "$MINT_PENDING" undelivered || true
 }
 
 cmd_revoke() {
@@ -367,6 +456,7 @@ cmd_revoke() {
   ledger_append "revoke github task=$task fp=$fp result=$result" \
     || printf 'warning: the revoke of fp=%s could not be recorded in %s\n' "$fp" "$LEDGER" >&2
   [ "$result" != failed ] || die "GitHub did not confirm the revoke of the token with fp=$fp"
+  pending_clear "$task" "$fp" || die "could not clear the confirmed revoke from pending credentials"
   printf 'revoke=%s\nfp=%s\n' "$result" "$fp"
 }
 
@@ -391,6 +481,9 @@ cmd_record_revoke() {
   case "$result" in revoked|invalid|expired|failed) ;; *) die "record-revoke needs --result revoked, invalid, expired, or failed" ;; esac
   ledger_append "revoke github task=$task fp=$fp result=$result via=host" \
     || die "the host's revoke of fp=$fp could not be recorded in $LEDGER"
+  case "$result" in
+    revoked|invalid) pending_clear "$task" "$fp" || die "could not clear the host's confirmed revoke" ;;
+  esac
 }
 
 # --- refresh --------------------------------------------------------------------
@@ -451,7 +544,7 @@ refresh_failed() { # <task> <result> <reason> <diagnostic> [<minted-fp>]
 }
 
 refresh_task() { # <task>
-  local task=$1 now expires_at rc out back revoked line result fp
+  local task=$1 now expires_at rc out back
   ledger_current "$task" || return 0
   [ "$CUR_REVOKED" = 0 ] || return 0
   if ! valid_fp "$CUR_FP" || ! valid_repo "$CUR_REPO" || ! valid_access "$CUR_ACCESS" \
@@ -469,6 +562,7 @@ refresh_task() { # <task>
   ! lock_live "$STATE/.spawn-$task.lock" || return 0
   fm_lock_try_acquire "$STATE/.control-$task.lock" || return 0
   ACTIVE_TASK=$task
+  DELIVERY_CONFIRMED=0
   work_dir
   rm -f -- "$WORK/token"
   if ! github_mint "$task" "$CUR_REPO" "$CUR_ACCESS" refresh "$WORK/token"; then
@@ -484,22 +578,13 @@ refresh_task() { # <task>
   back=$(printf '%s\n' "$out" | sed -n 's/^gh_token_fp=//p' | tail -n 1)
   if [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$out" | sed -n '1p')" = "schema=fm-remote-task-control.v1" ] \
     && printf '%s\n' "$out" | grep -qx 'refresh=stored' && [ "$back" = "$MINT_FP" ]; then
+    DELIVERY_CONFIRMED=1
     ledger_append "refresh github task=$task fp=$MINT_FP expires=$MINT_EXPIRES result=delivered" || true
-    result=
-    while IFS= read -r line; do
-      case "$line" in
-        gh_token_revoke=*) result=${line#*=}; continue ;;
-        gh_token_fp=*) fp=${line#*=} ;;
-        *) continue ;;
-      esac
-      case "$result" in revoked|invalid|failed) ;; *) continue ;; esac
-      valid_fp "$fp" || continue
-      ledger_append "revoke github task=$task fp=$fp result=$result via=host" || true
-      result=
-    done <<< "$out"
+    pending_revoke_fp "$task" "$CUR_FP" || true
     fm_lock_release "$STATE/.control-$task.lock" || true
     return 0
   fi
+  revoke_undelivered "$task"
   fm_lock_release "$STATE/.control-$task.lock" || true
   if [ "$rc" -eq 0 ]; then
     refresh_failed "$task" unknown unconfirmed "the sandbox host did not confirm it stored the new token" "$MINT_FP"
@@ -508,9 +593,7 @@ refresh_task() { # <task>
   elif fm_timed_out "$rc"; then
     refresh_failed "$task" unknown timeout "no answer from the sandbox host within ${PUSH_TIMEOUT}s" "$MINT_FP"
   else
-    revoked=$(github_revoke "$WORK/token") || true
-    ledger_append "revoke github task=$task fp=$MINT_FP result=$revoked reason=undelivered" || true
-    refresh_failed "$task" failed refused "the sandbox host refused the new token (exit $rc), so it was revoked" "$MINT_FP"
+    refresh_failed "$task" failed refused "the sandbox host refused the new token (exit $rc); cleanup revocation was attempted" "$MINT_FP"
   fi
   rm -f -- "$WORK/token"
 }
@@ -558,6 +641,7 @@ shift 2
 case "$VERB" in
   mint) cmd_mint "$@" ;;
   revoke) cmd_revoke "$@" ;;
+  retire) cmd_retire "$@" ;;
   refresh-due) cmd_refresh_due "$@" ;;
   record-revoke) cmd_record_revoke "$@" ;;
   *) usage ;;

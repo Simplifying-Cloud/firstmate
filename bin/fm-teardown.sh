@@ -3473,7 +3473,8 @@ teardown_public_followup_checks() {
 #      refusal is relayed, the mirror re-armed, and the sandbox, its hold label,
 #      and every record kept. SSH exit 255 is unknown completion: everything is
 #      preserved, mirror quiesced, for a rerun, which the host's retirement
-#      record makes safe.
+#      record makes safe. A passing retire also reports the host's revoke of
+#      its stored GitHub App token, which sandbox_record_host_revoke records.
 #   4. On a pass the destroy-pending record is written, the mirror's cursor
 #      retired, and this home's records removed with the backlog transition;
 #      only then is the sandbox destroyed, once, with --expect-task label
@@ -3507,6 +3508,28 @@ sandbox_mirror() { # <verb> [args...]
 sandbox_relay_host_text() { # <text>
   [ -n "$1" ] || return 0
   printf '%s\n' "$1" | LC_ALL=C tr '\000-\010\013-\037\177' '?' | head -n 50 >&2
+}
+
+# A ship's host revokes its stored GitHub App token after its teardown passes
+# and reports the result (bin/fm-remote-task-control.sh retire); this records
+# it in this home's credential ledger (bin/fm-cred-broker.sh). The report is
+# untrusted host text, so only an exact result and fingerprint pass, and a
+# ledger failure only warns, because the revoke itself already happened.
+sandbox_record_host_revoke() { # <host-output>
+  local result='' fp line
+  while IFS= read -r line; do
+    case "$line" in
+      gh_token_revoke=*) result=${line#*=}; continue ;;
+      gh_token_fp=*) fp=${line#*=} ;;
+      *) continue ;;
+    esac
+    case "$result" in revoked|invalid|expired|failed) ;; *) continue ;; esac
+    [[ "$fp" =~ ^[0-9a-f]{12}$ ]] || continue
+    FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$SCRIPT_DIR/fm-cred-broker.sh" github record-revoke --task "$ID" --fp "$fp" --result "$result" \
+      || echo "warning: sandbox task $ID's GitHub token revoke ($result) could not be recorded in its credential ledger" >&2
+    result=
+  done <<< "$1"
 }
 
 sandbox_task_teardown() {
@@ -3576,8 +3599,17 @@ sandbox_task_teardown() {
     exit 1
   fi
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ]; then
-    out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
-      "$SCRIPT_DIR/fm-on.sh" "$ID" "$FM_REMOTE_ROUTE_CONTROL" retire "$ID" < /dev/null 2>&1) || rc=$?
+    if [ -L "$STATE/cred-ledger" ] || { [ -e "$STATE/cred-ledger" ] && [ ! -f "$STATE/cred-ledger" ]; } \
+      || ! (umask 077; printf '%s retire github task=%s result=attempted\n' "$(date +%s)" "$ID" >> "$STATE/cred-ledger"); then
+      echo "REFUSED: sandbox task $ID's retirement attempt could not be recorded" >&2
+      exit 1
+    fi
+    out=$( { awk -v task="$ID" '
+      $2 == "mint" && $3 == "github" {
+        for (i = 4; i <= NF; i++) if ($i == "task=" task) { print; break }
+      }' "$STATE/cred-ledger" 2>/dev/null || true; } | FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+      "$SCRIPT_DIR/fm-on.sh" --stdin "$ID" "$FM_REMOTE_ROUTE_CONTROL" retire "$ID" 2>&1) || rc=$?
+    sandbox_record_host_revoke "$out"
     if [ "$rc" -eq 255 ]; then
       sandbox_relay_host_text "$out"
       echo "error: sandbox task $ID's retirement on $FM_REMOTE_ROUTE_HOST has unknown completion (SSH exit 255); its sandbox $name, hold label, task record, and backlog item are preserved - rerun teardown once the host is reachable" >&2
@@ -3588,6 +3620,11 @@ sandbox_task_teardown() {
       sandbox_mirror arm-locked "$ID" \
         || echo "error: sandbox task $ID's status mirror could not be re-armed ($SANDBOX_MIRROR_ERROR); rerun bin/fm-procevent-remote-reply.sh arm $ID" >&2
       exit "$rc"
+    fi
+    if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$SCRIPT_DIR/fm-cred-broker.sh" github retire --task "$ID"; then
+      echo "REFUSED: sandbox task $ID still has pending GitHub credentials; keeping its sandbox and task record for retry" >&2
+      exit 1
     fi
   fi
 

@@ -24,6 +24,9 @@ TMP_ROOT=$(cd "$TMP_ROOT" && pwd -P)
 RUN_ID=$$
 GH_SECRET="github_pat_SANDBOXGHSECRET${RUN_ID}x"
 PI_SECRET="sk-pi-SANDBOXPISECRET${RUN_ID}x"
+# GitHub App installation tokens, long like the stateless format.
+APP_SECRET="ghs_SANDBOXAPPSECRET${RUN_ID}$(printf 'Ab9_%.0s' $(seq 1 120))"
+REFRESH_SECRET="ghs_SANDBOXREFRESHSECRET${RUN_ID}$(printf 'Zq7-%.0s' $(seq 1 120))"
 
 # A spawn stages its per-task temp root at /tmp/fm-<id>, outside every fixture,
 # so task ids carry this run's id and the roots are removed here.
@@ -78,7 +81,7 @@ cat > "$FAKEBIN/gh" <<'SH'
 set -eu
 printf '%s\n' "$@" >> "$HOME/../gh.argv"
 env > "$HOME/../gh.environment"
-store="$HOME/.config/gh"
+store="${GH_CONFIG_DIR:-$HOME/.config/gh}"
 case "$*" in
   "auth login --hostname github.com --git-protocol https --insecure-storage --with-token")
     cat > "$HOME/../gh.stdin"
@@ -102,6 +105,13 @@ case "$*" in
     printf 'username=x-access-token\npassword=%s\n' "$(cat "$store/hosts.yml")"
     ;;
   "auth git-credential store"|"auth git-credential erase") cat >/dev/null ;;
+  "auth token --hostname github.com") cat "$store/hosts.yml" ;;
+  "api --method DELETE /installation/token --include")
+    printf 'revoke\n' >> "$HOME/../gh.revokes"
+    code=$(cat "$HOME/../gh-revoke-status" 2>/dev/null || printf '204')
+    printf 'HTTP/2.0 %s Fake\r\nContent-Length: 0\r\n\r\n' "$code"
+    [ "$code" = 204 ] || exit 1
+    ;;
   *) exit 1 ;;
 esac
 SH
@@ -248,7 +258,7 @@ run_control() { # <verb> [args...]; stdin passes through
 # assert_no_secret <label> <path-or-text...>: neither credential value appears.
 assert_no_secret_text() { # <label> <text>
   case "$2" in
-    *"$GH_SECRET"*|*"$PI_SECRET"*) fail "$1 echoed a credential value" ;;
+    *"$GH_SECRET"*|*"$PI_SECRET"*|*"$APP_SECRET"*|*"$REFRESH_SECRET"*) fail "$1 echoed a credential value" ;;
   esac
 }
 # assert_secret_only_in <label> <root> [<file>...]: under <root>, exactly the
@@ -263,9 +273,11 @@ assert_secret_only_in() {
 assert_no_secret_files() { # <label> <path...>
   local label=$1 hit
   shift
-  hit=$(grep -rlF -e "$GH_SECRET" -e "$PI_SECRET" "$@" 2>/dev/null || true)
+  hit=$(grep -rlF -e "$GH_SECRET" -e "$PI_SECRET" -e "$APP_SECRET" -e "$REFRESH_SECRET" "$@" 2>/dev/null || true)
   [ -z "$hit" ] || fail "$label holds a credential value: $hit"
 }
+
+token_fp() { printf '%s' "$1" | sha256_of /dev/stdin | cut -c1-12; }
 
 # provision_ship <harness> [mode]: provision $ID as a ship and fail on refusal.
 provision_ship() {
@@ -913,6 +925,7 @@ test_retire_runs_the_host_teardown_for_ships_only() {
   out=$(run_control observe "$ID" 2>&1)
   assert_equals missing "$(route_value "$out" agent)" "a retired task has no endpoint to observe"
   assert_equals missing "$(run_control state "$ID" 2>/dev/null)" "a retired task's state is missing"
+  assert_absent "$CASE/gh.revokes" "a stored token that is not an App installation token is never revoked"
   out=$(run_control retire "$ID" 2>&1); rc=$?
   expect_code 0 "$rc" "a repeated retire should succeed"
   assert_equals "already-retired: $ID" "$out" "a repeated retire reports already-retired"
@@ -926,6 +939,170 @@ test_retire_runs_the_host_teardown_for_ships_only() {
   [ "$rc" -ne 0 ] || fail "retiring a scout on its host was accepted"
   assert_contains "$out" "is a scout" "the scout refusal names the kind"
   pass "retire relays the host teardown's landed-work verdict, records a pass, and refuses scouts"
+}
+
+refresh_input() { # <token>; one cred-refresh request on stdout
+  printf 'gh_token_b64=%s\n' "$(printf '%s' "$1" | b64)"
+}
+
+test_cred_refresh_replaces_the_stored_token() {
+  local out rc again fp store
+  new_case cred-refresh
+  provision_ship claude
+  store="$ACCOUNT_HOME/.config/gh/hosts.yml"
+  refresh_input "$REFRESH_SECRET" > "$CASE/refresh"
+  out=$(run_control cred-refresh "$ID" < "$CASE/refresh" 2>&1); rc=$?
+  expect_code 0 "$rc" "a valid refresh should store the new token"$'\n'"$out"
+  fp=$(token_fp "$REFRESH_SECRET")
+  assert_equals "schema=fm-remote-task-control.v1"$'\n'"refresh=stored"$'\n'"task_id=$ID"$'\n'"gh_token_fp=$fp" "$out" \
+    "the refresh reports the stored token's fingerprint"
+  assert_equals "$REFRESH_SECRET" "$(cat "$store")" "the gh store holds the new token"
+  assert_equals 600 "$(mode_of "$store")" "the refreshed credential file is private"
+  grep -q ' credential refresh gh_token=gh/github.com$' "$TASK_HOME/state/task-provision.journal" \
+    || fail "the refresh is journaled"
+  again=$(run_control cred-refresh "$ID" < "$CASE/refresh" 2>&1); rc=$?
+  expect_code 0 "$rc" "replaying a refresh should succeed"
+  assert_equals "$out" "$again" "a replayed refresh reports the same block"
+  assert_equals "$REFRESH_SECRET" "$(cat "$store")" "a replayed refresh leaves the same token"
+
+  out=$(run_control cred-refresh "other-$ID" < "$CASE/refresh" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a refresh for another task was accepted"
+  assert_contains "$out" "belongs to task $ID, not other-$ID" "a refresh for another task names the home's owner"
+  : > "$CASE/empty"
+  out=$(run_control cred-refresh "$ID" < "$CASE/empty" 2>&1)
+  assert_contains "$out" "has no gh_token_b64 line" "an empty refresh is refused"
+  { refresh_input "$APP_SECRET"; printf 'pi_auth_b64=e30=\n'; } > "$CASE/extra"
+  out=$(run_control cred-refresh "$ID" < "$CASE/extra" 2>&1)
+  assert_contains "$out" "carries a line other than gh_token_b64" "a refresh carries nothing but the token"
+  { refresh_input "$APP_SECRET"; refresh_input "$APP_SECRET"; } > "$CASE/twice"
+  out=$(run_control cred-refresh "$ID" < "$CASE/twice" 2>&1)
+  assert_contains "$out" "repeats gh_token_b64" "a refresh names one token"
+  printf 'gh_token_b64=@@not-base64@@\n' > "$CASE/garbled"
+  out=$(run_control cred-refresh "$ID" < "$CASE/garbled" 2>&1)
+  assert_contains "$out" "the credential refresh's GitHub token is not valid base64" "an undecodable token is refused"
+  refresh_input "ghs_two words" > "$CASE/spaced"
+  out=$(run_control cred-refresh "$ID" < "$CASE/spaced" 2>&1)
+  assert_contains "$out" "must be printable ASCII without spaces" "an unusable token is refused"
+  head -c 70000 /dev/zero | tr '\0' a > "$CASE/huge"
+  out=$(run_control cred-refresh "$ID" < "$CASE/huge" 2>&1)
+  assert_contains "$out" "exceeds its 64 KiB bound" "an oversized refresh is refused"
+  refresh_input "$APP_SECRET" > "$CASE/failing"
+  out=$(FM_FAKE_GH_FAIL=1 run_control cred-refresh "$ID" < "$CASE/failing" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a refresh gh could not store was accepted"
+  assert_contains "$out" "gh credential storage failed for github.com" "a failed store is named"
+  assert_no_secret_text "a failed refresh" "$out"
+  assert_equals "$REFRESH_SECRET" "$(cat "$store")" "every refused refresh keeps the previous token"
+  assert_equals 2 "$(grep -c ' credential refresh ' "$TASK_HOME/state/task-provision.journal")" "only stored refreshes are journaled"
+  assert_no_secret_files "the task home after refreshes" "$TASK_HOME"
+  [ -z "$(find "$CASE/tmp" -mindepth 1 -print)" ] || fail "refreshes left staging files: $(find "$CASE/tmp" -mindepth 1 -print)"
+
+  : > "$TASK_HOME/state/$ID.retired"
+  out=$(run_control cred-refresh "$ID" < "$CASE/refresh" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a retired task's token was refreshed"
+  assert_contains "$out" "is retired on this host" "a retired task is never refreshed"
+
+  new_case cred-unprovisioned
+  mkdir -p "$TASK_HOME"
+  out=$(run_control cred-refresh "$ID" < "$CASE/../cred-refresh/refresh" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an unprovisioned home accepted a refresh"
+  assert_contains "$out" "not a provisioned sandbox task home" "an unprovisioned home is refused"
+  assert_absent "$ACCOUNT_HOME/.config/gh/hosts.yml" "an unprovisioned home stores nothing"
+  pass "cred-refresh stores a fresh token idempotently and refuses another task, an unprovisioned or retired home, and malformed input"
+}
+
+test_retire_revokes_a_stored_app_token() {
+  local out rc fp
+  new_case retire-app
+  write_manifest "$CASE/manifest" ship claude
+  manifest_set "$CASE/manifest" gh_token_b64 "gh_token_b64=$(printf '%s' "$APP_SECRET" | b64)"
+  run_control provision "$ID" < "$CASE/manifest" >/dev/null 2>&1 || fail "provisioning with an App token failed"
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "retire of landed work should pass"$'\n'"$out"
+  fp=$(token_fp "$APP_SECRET")
+  assert_contains "$out" "teardown $ID complete" "the host teardown's result is relayed"
+  assert_equals "gh_token_revoke=revoked"$'\n'"gh_token_fp=$fp" "$(printf '%s\n' "$out" | grep '^gh_token_')" \
+    "retire reports the App token's revoke and fingerprint"
+  assert_equals 1 "$(grep -c . "$CASE/gh.revokes")" "retire deletes the installation token once"
+  grep -q ' credential revoke gh_token result=revoked$' "$TASK_HOME/state/task-provision.journal" \
+    || fail "the revoke is journaled"
+  assert_equals "revoked $fp" "$(cat "$TASK_HOME/state/$ID.gh-token-revoke")" "the revoke result is kept for a retry"
+  assert_no_secret_text "retire output" "$out"
+  assert_no_secret_files "the retired home" "$TASK_HOME"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "a repeated retire should succeed"
+  assert_equals "already-retired: $ID"$'\n'"gh_token_revoke=revoked"$'\n'"gh_token_fp=$fp" "$out" \
+    "a repeated retire reports the recorded revoke"
+  assert_equals 1 "$(grep -c . "$CASE/gh.revokes")" "a repeated retire never deletes again"
+
+  new_case retire-app-failed
+  write_manifest "$CASE/manifest" ship claude
+  manifest_set "$CASE/manifest" gh_token_b64 "gh_token_b64=$(printf '%s' "$APP_SECRET" | b64)"
+  run_control provision "$ID" < "$CASE/manifest" >/dev/null 2>&1 || fail "provisioning with an App token failed"
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  printf '502\n' > "$CASE/gh-revoke-status"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 1 "$rc" "a failed revoke blocks retirement"$'\n'"$out"
+  assert_contains "$out" "gh_token_revoke=failed" "a revoke GitHub did not confirm is reported as failed"
+  assert_absent "$TASK_HOME/state/$ID.retired" "an unconfirmed revoke keeps retirement retryable"
+  assert_present "$TASK_HOME/state/$ID.teardown-passed" "teardown passed before the revoke failed"
+  refresh_input "$REFRESH_SECRET" > "$CASE/refresh"
+  out=$(run_control cred-refresh "$ID" < "$CASE/refresh" 2>&1); rc=$?
+  expect_code 1 "$rc" "a task awaiting revocation refuses refresh"
+  assert_contains "$out" "has passed teardown" "refresh refusal identifies the completed teardown"
+  assert_equals "$APP_SECRET" "$(cat "$ACCOUNT_HOME/.config/gh/hosts.yml")" "refused refresh preserves the retiring token"
+  printf '204\n' > "$CASE/gh-revoke-status"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "a later confirmed revoke completes retirement"$'\n'"$out"
+  assert_present "$TASK_HOME/state/$ID.retired" "confirmed retirement is recorded"
+  assert_equals 2 "$(grep -c . "$CASE/gh.revokes")" "the failed revoke is retried"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "successful retirement replays"
+  assert_equals 2 "$(grep -c . "$CASE/gh.revokes")" "replay does not revoke again"
+
+  new_case retire-app-expiry
+  write_manifest "$CASE/manifest" ship claude
+  manifest_set "$CASE/manifest" gh_token_b64 "gh_token_b64=$(printf '%s' "$APP_SECRET" | b64)"
+  run_control provision "$ID" < "$CASE/manifest" >/dev/null 2>&1 || fail "provision failed"
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  printf '502\n' > "$CASE/gh-revoke-status"
+  printf '1 mint github task=%s fp=%s expires=2099-01-01T00:00:00Z\n' "$ID" "$fp" > "$CASE/ledger"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 1 "$rc" "a live token cannot close retirement"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 1 "$rc" "persistent failure stays retryable"
+  assert_absent "$TASK_HOME/state/$ID.retired" "no marker exists before expiry"
+  printf '1 mint github task=%s fp=%s expires=2000-01-01T00:00:00Z\n' "$ID" "$fp" > "$CASE/ledger"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 0 "$rc" "ledger expiry closes persistent revoke failure"$'\n'"$out"
+  assert_contains "$out" 'gh_token_revoke=expired' "expiry is distinguished from revocation"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 0 "$rc" "expiry closure replays"
+  assert_contains "$out" 'gh_token_revoke=expired' "replay retains the closure reason"
+  assert_equals 3 "$(grep -c . "$CASE/gh.revokes")" "expiry replay does not repeat revocation"
+  pass "retire revokes a stored App installation token once, reports it, and keeps the result for a retry"
+}
+
+test_retire_without_credentials_or_gh() {
+  local out rc base_path
+  new_case retire-no-gh
+  write_manifest "$CASE/manifest" ship claude
+  manifest_set "$CASE/manifest" gh_token_b64 ''
+  run_control provision "$ID" < "$CASE/manifest" >/dev/null 2>&1 || fail "provision failed"
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  base_path=$(fm_test_base_path_sans "$FAKEBIN:$PATH" gh)
+  out=$(PATH="$base_path" FAKEBIN="$base_path" run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "credential-free retirement does not require gh"$'\n'"$out"
+  assert_present "$TASK_HOME/state/$ID.retired" "credential-free retirement completes"
+  assert_absent "$CASE/gh.revokes" "credential-free retirement never revokes"
 }
 
 test_dispatch_refuses_malformed_calls() {
@@ -959,5 +1136,8 @@ test_send_writes_one_durable_record_per_steer
 test_brief_update_replaces_the_brief_only_for_this_home
 test_control_drives_the_host_control_plane
 test_retire_runs_the_host_teardown_for_ships_only
+test_cred_refresh_replaces_the_stored_token
+test_retire_revokes_a_stored_app_token
+test_retire_without_credentials_or_gh
 test_dispatch_refuses_malformed_calls
 echo "ALL TESTS PASSED"

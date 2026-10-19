@@ -361,6 +361,39 @@ test_an_unreachable_host_is_reported_once_per_streak() {
   pass "an unreachable host is unknown: one keyed check wake per failure streak, never stale or dead"
 }
 
+# --- the minted GitHub token's refresh -------------------------------------------
+
+test_a_failed_credential_refresh_wakes_once() {
+  local out expires_at expires
+  new_case cred-refresh
+  observe_as alive busy
+  : > "$CASE/host/churn"
+  printf '#!/usr/bin/env bash\nprintf "called\\n" >> "%s/curl.log"\nexit 7\n' "$CASE" > "$FAKEBIN/curl"
+  chmod +x "$FAKEBIN/curl"
+  # The current token expires within the refresh lead, and this home has no
+  # config/github-app, so the refresh fails before any request.
+  expires_at=$(( $(date +%s) + 300 ))
+  expires=$(date -u -r "$expires_at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$expires_at" +%Y-%m-%dT%H:%M:%SZ)
+  printf '%s mint github task=%s repo=acme/alpha access=write expires=%s fp=0123456789ab purpose=launch\n' \
+    "$(date +%s)" "$ID" "$expires" > "$STATE/cred-ledger"
+  watch_round exit || fail "a failed credential refresh never woke the watcher: $(cat "$CASE/watch.out")"
+  out=$(cat "$CASE/watch.out")
+  assert_contains "$out" "check: sandbox $ID credential refresh failed: the GitHub App configuration" \
+    "the wake names the task and why its refresh failed"
+  assert_contains "$out" "its current GitHub token expires at $expires" "the wake names the expiry"
+  [ "$(check_wakes "cred-refresh-$ID-0123456789ab")" -eq 1 ] || fail "the failed refresh did not queue exactly one keyed wake"
+  grep -q " refresh github task=$ID result=failed reason=mint alerted=yes$" "$STATE/cred-ledger" \
+    || fail "the failure is not recorded in the ledger: $(cat "$STATE/cred-ledger")"
+  assert_absent "$CASE/curl.log" "a refresh without a GitHub App configuration made a request"
+  ack_stopped_cycle "$STATE" || fail "could not acknowledge the refresh wake"
+
+  # The same token's failure never wakes again while its retry waits.
+  watch_round run 4 || fail "a repeated refresh failure woke the watcher again: $(cat "$CASE/watch.out")"
+  [ "$(check_wakes "cred-refresh-$ID-")" -eq 0 ] || fail "a repeated refresh failure queued another wake"
+  assert_no_local_reads "the credential refresh"
+  pass "a sandbox task's failed GitHub token refresh wakes the watcher once per token"
+}
+
 # --- the steering re-ring ladder ------------------------------------------------
 
 test_the_ladder_rings_through_the_host_and_escalates() {
@@ -421,4 +454,5 @@ test_observation_discarded_when_lifecycle_changes
 test_an_unreachable_host_is_reported_once_per_streak
 test_the_ladder_rings_through_the_host_and_escalates
 test_the_wedge_timer_reads_the_hosts_worktree_writes
+test_a_failed_credential_refresh_wakes_once
 echo "ALL TESTS PASSED"

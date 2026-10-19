@@ -9,7 +9,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
-| Remote task sandboxes | [Sandbox provider](#sandbox-provider-configsandbox-provider) and [sandbox credentials](#sandbox-credentials-configsandbox-credentials) |
+| Remote task sandboxes | [Sandbox provider](#sandbox-provider-configsandbox-provider), [sandbox credentials](#sandbox-credentials-configsandbox-credentials), and [GitHub App](#github-app-configgithub-app) |
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
@@ -92,6 +92,7 @@ Each effective `FM_HOME` contains private operational directories.
 - Private secondmate config-reread generations with their retry and quarantine state.
 - Per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`).
 - Parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
+- The append-only credential ledger `state/cred-ledger` and protected per-task pending credentials under `state/cred-pending/` (`bin/fm-cred-broker.sh`).
 
 `config/` holds local gitignored operating choices, including explicit extension bindings under `config/extensions.d/`.
 
@@ -573,6 +574,7 @@ Each non-blank line that does not start with `#` names one credential as whitesp
 ```text
 <name> <destination> <source> [<condition>...]
 gh-firstmate  github      /home/me/.config/firstmate/gh-firstmate.token  project=firstmate
+gh-app        github      app                                            project=proxmox-lab
 minimax       pi:minimax  /home/me/.config/firstmate/minimax.key
 ```
 
@@ -580,14 +582,48 @@ minimax       pi:minimax  /home/me/.config/firstmate/minimax.key
 | --- | --- |
 | `<name>` | A unique label, used in messages and the spawn's success line; letters, digits, `.`, `_`, and `-`. |
 | `<destination>` | `github` for the GitHub token the sandbox account stores for github.com, or `pi:<provider>` for one API-key entry of the sandbox account's Pi credential file. |
-| `<source>` | The absolute path of a readable regular file, not a symlink, owned by this account, with no group or other permission bits (for example mode 0600 or 0400), holding the value as one line of printable ASCII without spaces. |
+| `<source>` | The absolute path of a readable regular file, not a symlink, owned by this account, with no group or other permission bits (for example mode 0600 or 0400), holding the value as one line of printable ASCII without spaces; or, for a `github` entry only, the literal `app`. |
 | `<condition>` | Optional `harness=`, `provider=`, `mode=`, or `project=`, each at most once, each holding one or more comma-separated values. |
 
 A credential is sent when every condition it carries matches the task: its harness, the provider its `--model <provider>/<id>` names, its delivery mode (`scout` for a scout), and its project.
 A `pi:<provider>` entry is additionally sent only to a `pi` or `pi-signed` worker whose model names that provider, so a sandboxed Pi worker needs an explicit `--model <provider>/<id>` and a matching entry, or the spawn refuses.
 At most one `github` entry and one Pi entry may match a task.
-Every entry's structure and source-file safety are validated on every sandbox spawn, including entries that do not match; credential values are validated only for selected entries.
-See [sandbox credentials](remote-sandboxes.md#credentials) for transport and secrecy guarantees.
+An `app` source sends a GitHub App installation token minted at spawn for exactly the task's repository instead of a stored token: read-only for a scout and read-write for a ship.
+It needs a valid [`config/github-app`](#github-app-configgithub-app), and a matching entry also needs a project origin on github.com (`https://github.com/<owner>/<name>`, `git@github.com:<owner>/<name>`, or `ssh://git@github.com/<owner>/<name>`, with or without `.git`), or the spawn refuses before any sandbox exists.
+Every entry's structure and source-file safety are validated on every sandbox spawn, including entries that do not match, and an `app` entry's `config/github-app` is validated the same way; credential values are validated only for selected entries.
+See [sandbox credentials](remote-sandboxes.md#credentials) for transport, secrecy, refresh, and revocation guarantees.
+
+## GitHub App (`config/github-app`)
+
+The GitHub App whose installation tokens an `app` source in [`config/sandbox-credentials`](#sandbox-credentials-configsandbox-credentials) receives is named by this local, gitignored, captain-owned file.
+[`bin/fm-cred-broker.sh`](../bin/fm-cred-broker.sh) mints, refreshes, and revokes those tokens, and [`bin/fm-sandbox-credentials-lib.sh`](../bin/fm-sandbox-credentials-lib.sh) reads and checks this file.
+
+```text
+app_id=123456
+installation_id=78901234
+private_key=/home/me/.config/firstmate/github-app.pem
+workflows=on
+```
+
+| Key | Meaning |
+| --- | --- |
+| `app_id` | The App's numeric ID, the issuer of the JWTs that request installation tokens. |
+| `installation_id` | The numeric ID of the App's installation on the account that owns the task repositories. |
+| `private_key` | The absolute path of the App's PEM private key, held to the same file-safety rules as a credential source file. |
+| `workflows` | `on` adds Workflows read and write to a ship's token, for repositories whose tasks edit `.github/workflows/`; `off`, the default, never asks for it. |
+
+`app_id`, `installation_id`, and `private_key` are required; unknown or repeated keys, a non-numeric ID, a `workflows` value other than `on` or `off`, and a key file that is not a PEM RSA private key are refused with the concrete problem named.
+Blank lines and `#` comments are accepted, and the file itself must pass the same file-safety rules as the key.
+Create the App as a private App owned by the account that owns the task repositories, without a webhook, and install it on the repositories sandbox tasks may touch.
+The installation may cover additional repositories; each task token is still restricted to its one repository.
+It needs these repository permissions, the most a ship's token requests:
+
+- Metadata: read
+- Contents, Pull requests, and Issues: read and write
+- Checks, Commit statuses, and Actions: read
+- Workflows: read and write, only with `workflows=on`
+
+A scout's token requests only Contents, Metadata, and Pull requests read.
 
 ## Away-mode supervisor backend (FM_SUPERVISOR_BACKEND / FM_SUPERVISOR_TARGET)
 

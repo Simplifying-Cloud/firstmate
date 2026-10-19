@@ -295,7 +295,9 @@
 #   other profile must be the one the brief records (fm-brief.sh
 #   --sandbox-profile), and a recorded profile must match the spawn's. A sandbox
 #   outage or refusal is a blocker, never a local fallback.
-#   The sequence is the backlog preflight (no sandbox exists before it), create,
+#   The sequence is the backlog preflight (no sandbox exists before it), the
+#   provisioning manifest (an app credential's token is minted here, so a mint
+#   failure also refuses before any sandbox exists), create,
 #   a provisional task record carrying the route, one provider exec that
 #   fast-forwards the host's code root to this home's default-branch commit
 #   (`git -C <remote_root> pull --quiet --ff-only --no-rebase --no-tags origin
@@ -309,7 +311,10 @@
 #   (bin/fm-sandbox-credentials-lib.sh); it exists only in this process and the
 #   transport's stdin, never in a file, an argument, or the record.
 #   A failure before launch destroys the sandbox, which holds no work, and
-#   removes the provisional record. Once launch may have started - any launch
+#   removes the provisional record; cleanup attempts revocation of its App
+#   token through bin/fm-cred-broker.sh, whose pending set retains unconfirmed
+#   revocations. Cleanup leaves the token alone once a worker may be using it.
+#   Once launch may have started - any launch
 #   failure, a malformed route block, or a failed record update or backlog
 #   transition - the sandbox is held and the record kept, so the route stays
 #   reachable for reconciliation. An SSH exit 255 from the readiness gate,
@@ -1511,9 +1516,30 @@ SANDBOX_NAME=
 SANDBOX_ALIAS=
 SANDBOX_RECORD_PUBLISHED=0
 SANDBOX_TMP=
+# The manifest's minted GitHub App token, base64, while no worker can be using it.
+SBX_GH_APP_TOKEN_B64=
+
+# Revoke the minted launch token through a private file in SANDBOX_TMP.
+sandbox_revoke_launch_token() {
+  local file out=
+  [ -n "$SBX_GH_APP_TOKEN_B64" ] && [ -n "$SANDBOX_TMP" ] || return 0
+  file="$SANDBOX_TMP/gh-app.token"
+  if (umask 077; printf '%s' "$SBX_GH_APP_TOKEN_B64" | base64 --decode > "$file" 2>/dev/null) &&
+    out=$("$SCRIPT_DIR/fm-cred-broker.sh" github revoke --token-file "$file" 2>&1 >/dev/null); then
+    echo "notice: task $ID's GitHub App token was never used, so it was revoked" >&2
+  else
+    echo "warning: task $ID's unused GitHub App token could not be revoked${out:+ ($(first_line "${out#error: }"))}; it expires within an hour" >&2
+  fi
+  rm -f -- "$file"
+  SBX_GH_APP_TOKEN_B64=
+}
 
 sandbox_abort_cleanup() { # <exit-status>
   local status=$1 out
+  if [ "$status" -ne 0 ] && [ "$SANDBOX_ON_EXIT" != hold ]; then
+    sandbox_revoke_launch_token
+  fi
+  SBX_GH_APP_TOKEN_B64=
   [ -z "$SANDBOX_TMP" ] || rm -rf -- "$SANDBOX_TMP" 2>/dev/null || true
   SANDBOX_TMP=
   case "$SANDBOX_ON_EXIT" in
@@ -1638,7 +1664,7 @@ sandbox_manifest() {
   for name in $SBX_LAUNCH_CONFIG; do
     printf 'config=%s|%s\n' "$name" "$(sandbox_b64 <"$CONFIG/$name")"
   done
-  fm_sandbox_credentials_manifest_fields || {
+  fm_sandbox_credentials_manifest_fields "$ID" || {
     echo "error: $FM_SANDBOX_CREDENTIAL_ERROR" >&2
     return 1
   }
@@ -1795,7 +1821,7 @@ spawn_sandbox_task() {
   else
     SBX_CREDENTIAL_MODE=scout
   fi
-  if ! fm_sandbox_credentials_select "$CONFIG/sandbox-credentials" "$SBX_HARNESS" "$SBX_MODEL_PROVIDER" "$SBX_CREDENTIAL_MODE" "$SBX_PROJECT"; then
+  if ! fm_sandbox_credentials_select "$CONFIG/sandbox-credentials" "$SBX_HARNESS" "$SBX_MODEL_PROVIDER" "$SBX_CREDENTIAL_MODE" "$SBX_PROJECT" "$SBX_ORIGIN"; then
     echo "error: --placement sandbox refused: $FM_SANDBOX_CREDENTIAL_ERROR" >&2
     exit 1
   fi
@@ -1837,6 +1863,18 @@ spawn_sandbox_task() {
     echo "error: could not create private spawn state" >&2
     exit 1
   }
+
+  # The provisioning manifest is built before sandbox creation so a refused
+  # App mint cannot leave a sandbox to clean up.
+  # It lives only in this process and the transport's stdin, never in a file
+  # or an argument.
+  if ! manifest=$(sandbox_manifest); then
+    echo "error: task $ID's provisioning manifest could not be built" >&2
+    exit 1
+  fi
+  if [ "$FM_SANDBOX_CREDENTIAL_GH_SOURCE" = app ]; then
+    SBX_GH_APP_TOKEN_B64=$(printf '%s\n' "$manifest" | sed -n 's/^gh_token_b64=//p')
+  fi
 
   # Create.
   if out=$("$SCRIPT_DIR/fm-sandbox.sh" create "$ID" --profile "$SBX_PROFILE" </dev/null 2>"$SANDBOX_TMP/create.err"); then
@@ -1941,12 +1979,7 @@ spawn_sandbox_task() {
     exit 1
   fi
 
-  # Provision the one-task home. The manifest lives only in this process and
-  # the transport's stdin, never in a file or an argument.
-  if ! manifest=$(sandbox_manifest); then
-    echo "error: task $ID's provisioning manifest could not be built" >&2
-    exit 1
-  fi
+  # Provision the one-task home from the manifest built above.
   if out=$(printf '%s\n' "$manifest" | "$SCRIPT_DIR/fm-on.sh" --stdin "$ID" fm-remote-task-control.sh provision "$ID" 2>"$SANDBOX_TMP/provision.err"); then
     rc=0
   else
@@ -1971,8 +2004,10 @@ spawn_sandbox_task() {
     ;;
   esac
 
-  # Launch. From here a worker may exist, so every failure holds.
+  # Launch. From here a worker may exist, so every failure holds, and its
+  # GitHub token is the worker's to use until retirement revokes it.
   SANDBOX_ON_EXIT=hold
+  SBX_GH_APP_TOKEN_B64=
   if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-task-control.sh launch "$ID" </dev/null 2>"$SANDBOX_TMP/launch.err"); then
     rc=0
   else

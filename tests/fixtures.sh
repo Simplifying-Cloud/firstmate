@@ -259,6 +259,102 @@ SH
   chmod +x "$fakebin/$name"
 }
 
+# fm_test_fake_github_api <fakebin> <state-dir>
+# A curl that answers the GitHub App installation token endpoints from
+# <state-dir> (exported to it as FM_FAKE_GITHUB_DIR), never the network:
+# POST /app/installations/<id>/access_tokens mints a 520-character
+# ghs_${FM_FAKE_GITHUB_TOKEN_TAG}<n>... token for the requested repository under
+# owner ${FM_FAKE_GITHUB_OWNER:-acme}, expiring <state-dir>/expires_in seconds
+# (default 3600) from now; <state-dir>/mode set to 401, 422, mismatch (a reply
+# naming another repository), or unreachable (curl exit 7) changes that answer.
+# DELETE /installation/token answers 204 for a minted, unrevoked token and 401
+# otherwise. It refuses any call whose first argument is not --disable and reads
+# the Authorization header only from --config on stdin. It records argv.log,
+# calls.log ("<method> <path> <status>"), the presented JWT as jwt.<n>, the
+# request body as request.<n>.json, and the minted and revoked tokens, so only
+# <state-dir> ever holds a token value the fake handed out. It uses REAL_JQ when
+# set, and never places a token in any command's argv.
+fm_test_fake_github_api() {
+  local fakebin=$1 dir=$2
+  mkdir -p "$dir"
+  export FM_FAKE_GITHUB_DIR=$dir
+  cat > "$fakebin/curl" <<'SH'
+#!/usr/bin/env bash
+set -u
+d=${FM_FAKE_GITHUB_DIR:?}
+jq=${REAL_JQ:-jq}
+printf '%s\n' "$*" >> "$d/argv.log"
+[ "${1:-}" = --disable ] || { echo "fake curl: --disable must come first" >&2; exit 2; }
+method=GET url='' out=/dev/null wout='' body='' config=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --request) method=$2; shift 2 ;;
+    --url) url=$2; shift 2 ;;
+    --output) out=$2; shift 2 ;;
+    --write-out) wout=$2; shift 2 ;;
+    --data-binary) body=${2#@}; shift 2 ;;
+    --config) [ "$2" != - ] || config=1; shift 2 ;;
+    --header|--max-time) shift 2 ;;
+    *) shift ;;
+  esac
+done
+cred=''
+if [ "$config" = 1 ]; then
+  while IFS= read -r line; do
+    case "$line" in 'header = "Authorization: Bearer '*'"') cred=${line#'header = "Authorization: Bearer '}; cred=${cred%'"'} ;; esac
+  done
+fi
+n=$(( $(cat "$d/count" 2>/dev/null || echo 0) + 1 ))
+printf '%s\n' "$n" > "$d/count"
+path=${url#https://api.github.com}
+listed() { # <file>; 0 when $cred is a line of <file>
+  local t
+  [ -f "$1" ] || return 1
+  while IFS= read -r t; do [ "$t" != "$cred" ] || return 0; done < "$1"
+  return 1
+}
+reply() { # <status> <body>
+  printf '%s' "$2" > "$out"
+  printf '%s %s %s\n' "$method" "$path" "$1" >> "$d/calls.log"
+  [ -z "$wout" ] || printf '%s' "$1"
+  exit 0
+}
+case "$method $path" in
+  "POST /app/installations/"*/access_tokens)
+    printf '%s' "$cred" > "$d/jwt.$n"
+    cp "$body" "$d/request.$n.json"
+    case "$(cat "$d/mode" 2>/dev/null || echo ok)" in
+      401) reply 401 '{"message":"A JSON web token could not be decoded"}' ;;
+      422) reply 422 '{"message":"There is at least one repository that does not exist or is not accessible to the parent installation."}' ;;
+      unreachable) printf '%s %s unreachable\n' "$method" "$path" >> "$d/calls.log"; exit 7 ;;
+      mismatch) full="${FM_FAKE_GITHUB_OWNER:-acme}/other-repo" ;;
+      *) full="${FM_FAKE_GITHUB_OWNER:-acme}/$("$jq" -r '.repositories[0]' "$body")" ;;
+    esac
+    token="ghs_${FM_FAKE_GITHUB_TOKEN_TAG:-FAKE}$(printf '%04d' "$n")"
+    while [ "${#token}" -lt 520 ]; do token="${token}Ab9_xZ"; done
+    token=${token:0:520}
+    printf '%s\n' "$token" >> "$d/minted"
+    e=$(( $(date +%s) + $(cat "$d/expires_in" 2>/dev/null || echo 3600) ))
+    exp=$(date -u -r "$e" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$e" +%Y-%m-%dT%H:%M:%SZ)
+    reply 201 "$(printf '{"token":"%s","expires_at":"%s","permissions":%s,"repository_selection":"selected","repositories":[{"full_name":"%s"}]}' \
+      "$token" "$exp" "$("$jq" -c '.permissions' "$body")" "$full")"
+    ;;
+  "DELETE /installation/token")
+    if [ -f "$d/delete-status" ]; then
+      reply "$(cat "$d/delete-status")" '{"message":"Fixture revoke failure"}'
+    fi
+    if listed "$d/minted" && ! listed "$d/revoked"; then
+      printf '%s\n' "$cred" >> "$d/revoked"
+      reply 204 ''
+    fi
+    reply 401 '{"message":"Bad credentials"}'
+    ;;
+  *) reply 404 '{"message":"Not Found"}' ;;
+esac
+SH
+  chmod +x "$fakebin/curl"
+}
+
 # fm_test_fake_sleep_noop <fakebin>
 fm_test_fake_sleep_noop() {
   local fakebin=$1

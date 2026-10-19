@@ -451,7 +451,7 @@ refresh_failed() { # <task> <result> <reason> <diagnostic> [<minted-fp>]
 }
 
 refresh_task() { # <task>
-  local task=$1 now expires_at rc out back revoked
+  local task=$1 now expires_at rc out back revoked line result fp
   ledger_current "$task" || return 0
   [ "$CUR_REVOKED" = 0 ] || return 0
   if ! valid_fp "$CUR_FP" || ! valid_repo "$CUR_REPO" || ! valid_access "$CUR_ACCESS" \
@@ -485,6 +485,18 @@ refresh_task() { # <task>
   if [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$out" | sed -n '1p')" = "schema=fm-remote-task-control.v1" ] \
     && printf '%s\n' "$out" | grep -qx 'refresh=stored' && [ "$back" = "$MINT_FP" ]; then
     ledger_append "refresh github task=$task fp=$MINT_FP expires=$MINT_EXPIRES result=delivered" || true
+    result=
+    while IFS= read -r line; do
+      case "$line" in
+        gh_token_revoke=*) result=${line#*=}; continue ;;
+        gh_token_fp=*) fp=${line#*=} ;;
+        *) continue ;;
+      esac
+      case "$result" in revoked|invalid|failed) ;; *) continue ;; esac
+      valid_fp "$fp" || continue
+      ledger_append "revoke github task=$task fp=$fp result=$result via=host" || true
+      result=
+    done <<< "$out"
     fm_lock_release "$STATE/.control-$task.lock" || true
     return 0
   fi

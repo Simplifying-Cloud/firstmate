@@ -57,13 +57,20 @@ mkdir -p "$HOST_BIN"
 cat > "$HOST_BIN/gh" <<'SH'
 #!/usr/bin/env bash
 set -eu
-store="$HOME/.config/gh"
+store="${GH_CONFIG_DIR:-$HOME/.config/gh}"
 case "$*" in
   "auth login --hostname github.com --git-protocol https --insecure-storage --with-token")
     if [ -e "$HOME/../gh-fail" ]; then cat > /dev/null; exit 1; fi
     mkdir -p "$store"
     cat > "$store/hosts.yml"
     printf 'git_protocol: https\n' > "$store/config.yml"
+    ;;
+  "auth token --hostname github.com") cat "$store/hosts.yml" ;;
+  "api --method DELETE /installation/token --include")
+    cat "$store/hosts.yml" >> "$FM_FAKE_GITHUB_DIR/revoked"
+    printf '\n' >> "$FM_FAKE_GITHUB_DIR/revoked"
+    printf 'DELETE /installation/token 204\n' >> "$FM_FAKE_GITHUB_DIR/calls.log"
+    printf 'HTTP/2.0 204 No Content\r\n\r\n'
     ;;
   *) exit 1 ;;
 esac
@@ -95,7 +102,7 @@ if [ "${FM_FAKE_SSH_MODE:-normal}" = unreachable ]; then
   cat > /dev/null
   exit 255
 fi
-exec env -i PATH="$FM_FAKE_HOST_BIN:$PATH" HOME="$FM_FAKE_HOST_ACCOUNT" TMPDIR="$FM_FAKE_HOST_TMP" \
+exec env -i FM_FAKE_GITHUB_DIR="$FM_FAKE_GITHUB_DIR" REAL_DATE="$REAL_DATE" PATH="$FM_FAKE_HOST_BIN:$PATH" HOME="$FM_FAKE_HOST_ACCOUNT" TMPDIR="$FM_FAKE_HOST_TMP" \
   FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$root/bin/${args[0]}" "${args[@]:1}"
 SH
 chmod +x "$FAKEBIN/fake-ssh"
@@ -495,6 +502,7 @@ launch_mint() {
   expect_code 0 "$RC" "the launch mint for $1 should succeed"$'\n'"$ERR"
   mkdir -p "$HOST_ACCOUNT/.config/gh"
   cp "$CASE/out/$1.launch" "$HOST_ACCOUNT/.config/gh/hosts.yml"
+  printf '1 credential gh_token=gh/github.com\n' > "$HOST_HOME/state/task-provision.journal"
   rm -f "$GH_DIR/expires_in"
 }
 
@@ -534,7 +542,10 @@ test_refresh_due_replaces_an_expiring_token_on_its_host() {
     "the token is pushed to the task's own host verb"
   grep -q ' credential refresh gh_token=gh/github.com$' "$HOST_HOME/state/task-provision.journal" \
     || fail "the host journals the refresh"
-  assert_equals 0 "$(deletes)" "a delivered token is never revoked"
+  assert_equals 1 "$(deletes)" "delivery revokes the predecessor"
+  assert_contains "$(ledger_line 4)" "fp=$(fp_of "$CASE/out/t-ref.launch") result=revoked via=host" "the predecessor revoke is ledgered"
+  run_broker github revoke --token-file "$CASE/out/t-ref.launch"
+  assert_contains "$OUT" 'revoke=invalid' "the predecessor no longer authenticates"
 
   refresh_due
   assert_equals 2 "$(posts)" "a refreshed token is not refreshed again before it is due"
@@ -607,7 +618,7 @@ test_refresh_failure_wakes_once_and_retries() {
   advance_clock 301
   refresh_due
   assert_equals "" "$OUT" "the recovered refresh is silent"
-  assert_contains "$(tail -n 1 "$LEDGER")" "result=delivered" "the retry delivers the token"
+  assert_contains "$(tail -n 2 "$LEDGER" | head -n 1)" "result=delivered" "the retry delivers the token"
   minted_token 4 "$CASE/recovered.token"
   cmp -s "$CASE/recovered.token" "$HOST_ACCOUNT/.config/gh/hosts.yml" || fail "the host does not hold the recovered token"
   OUT=$out1
@@ -651,7 +662,7 @@ test_failed_revoke_still_refreshes() {
   mv "$FAKEBIN/curl-api" "$FAKEBIN/curl"
   refresh_due
   assert_equals 2 "$(posts)" "a failed revoke leaves the running task eligible for refresh"
-  assert_contains "$(tail -n 1 "$LEDGER")" 'result=delivered' "the live token is refreshed"
+  assert_contains "$(tail -n 2 "$LEDGER" | head -n 1)" 'result=delivered' "the live token is refreshed"
 }
 
 test_refresh_budget_and_expiry_order() {

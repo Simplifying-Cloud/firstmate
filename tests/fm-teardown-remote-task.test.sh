@@ -175,7 +175,7 @@ SH
 printf '#!/usr/bin/env bash\nexit 1\n' > "$HOST_BIN/gh-axi"
 cat > "$HOST_BIN/gh" <<'SH'
 #!/usr/bin/env bash
-store="$HOME/.config/gh"
+store="${GH_CONFIG_DIR:-$HOME/.config/gh}"
 case "$*" in
   "auth login --hostname github.com --git-protocol https --insecure-storage --with-token")
     mkdir -p "$store" && cat > "$store/hosts.yml" ;;
@@ -265,6 +265,10 @@ printf '%s %s %s\n' "$host" "$cmd" "$verb" >> "$FM_FAKE_SSH_LOG"
 if [ "$cmd" = fm-remote-doctor.sh ]; then
   printf 'check harness=ok: pi\nok: task readiness confirmed on this host\n'
   exit 0
+fi
+if [ "$verb" = retire ]; then
+  cat > "$FM_FAKE_HOST_DIR/retire-input"
+  exec < "$FM_FAKE_HOST_DIR/retire-input"
 fi
 mode=${FM_FAKE_SSH_MODE:-normal}
 if [ "$mode:$verb" = retire-unreachable:retire ]; then
@@ -500,10 +504,12 @@ test_landed_ship_records_its_hosts_app_token_revoke() {
   run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   expect_code 0 "$RC" "a sandbox ship holding an App token should launch"$'\n'"$OUT"
   land_work
+  printf '1 mint github task=unrelated repo=private/other expires=2000-01-01T00:00:00Z fp=0123456789ab\n' > "$PRIMARY/state/cred-ledger"
   printf '502\n' > "$HOST_DIR/gh-revoke-status"
   run_teardown
   [ "$RC" -ne 0 ] || fail "unconfirmed revocation completed teardown"
   assert_equals 0 "$(destroy_calls)" "failed revocation preserves the sandbox"
+  assert_equals '' "$(cat "$HOST_DIR/retire-input")" "unrelated mint records never reach the retiring sandbox"
   assert_absent "$HOST_HOME/state/$ID.retired" "failed revocation leaves retirement open"
   assert_contains "$(tail -n 1 "$PRIMARY/state/cred-ledger")" 'result=failed via=host' "the supervisor records failed revocation"
   if [ "$closure" = expired ]; then

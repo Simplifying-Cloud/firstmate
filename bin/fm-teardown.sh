@@ -3516,17 +3516,20 @@ sandbox_relay_host_text() { # <text>
 # untrusted host text, so only an exact result and fingerprint pass, and a
 # ledger failure only warns, because the revoke itself already happened.
 sandbox_record_host_revoke() { # <host-output>
-  local result fp
-  result=$(printf '%s\n' "$1" | sed -n 's/^gh_token_revoke=//p' | tail -n 1)
-  fp=$(printf '%s\n' "$1" | sed -n 's/^gh_token_fp=//p' | tail -n 1)
-  case "$result" in revoked|invalid|expired|failed) ;; *) return 0 ;; esac
-  [[ "$fp" =~ ^[0-9a-f]{12}$ ]] || return 0
-  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
-    "$SCRIPT_DIR/fm-cred-broker.sh" github record-revoke --task "$ID" --fp "$fp" --result "$result" \
-    || echo "warning: sandbox task $ID's GitHub token revoke ($result) could not be recorded in its credential ledger" >&2
-  if [ "$result" = failed ]; then
-    echo "warning: sandbox task $ID's host could not confirm token revocation; retirement remains retryable" >&2
-  fi
+  local result='' fp line
+  while IFS= read -r line; do
+    case "$line" in
+      gh_token_revoke=*) result=${line#*=}; continue ;;
+      gh_token_fp=*) fp=${line#*=} ;;
+      *) continue ;;
+    esac
+    case "$result" in revoked|invalid|expired|failed) ;; *) continue ;; esac
+    [[ "$fp" =~ ^[0-9a-f]{12}$ ]] || continue
+    FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$SCRIPT_DIR/fm-cred-broker.sh" github record-revoke --task "$ID" --fp "$fp" --result "$result" \
+      || echo "warning: sandbox task $ID's GitHub token revoke ($result) could not be recorded in its credential ledger" >&2
+    result=
+  done <<< "$1"
 }
 
 sandbox_task_teardown() {
@@ -3596,7 +3599,10 @@ sandbox_task_teardown() {
     exit 1
   fi
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ]; then
-    out=$( { cat "$STATE/cred-ledger" 2>/dev/null || true; } | FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+    out=$( { awk -v task="$ID" '
+      $2 == "mint" && $3 == "github" {
+        for (i = 4; i <= NF; i++) if ($i == "task=" task) { print; break }
+      }' "$STATE/cred-ledger" 2>/dev/null || true; } | FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
       "$SCRIPT_DIR/fm-on.sh" --stdin "$ID" "$FM_REMOTE_ROUTE_CONTROL" retire "$ID" 2>&1) || rc=$?
     sandbox_record_host_revoke "$out"
     if [ "$rc" -eq 255 ]; then

@@ -3599,6 +3599,11 @@ sandbox_task_teardown() {
     exit 1
   fi
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ]; then
+    if [ -L "$STATE/cred-ledger" ] || { [ -e "$STATE/cred-ledger" ] && [ ! -f "$STATE/cred-ledger" ]; } \
+      || ! (umask 077; printf '%s retire github task=%s result=attempted\n' "$(date +%s)" "$ID" >> "$STATE/cred-ledger"); then
+      echo "REFUSED: sandbox task $ID's retirement attempt could not be recorded" >&2
+      exit 1
+    fi
     out=$( { awk -v task="$ID" '
       $2 == "mint" && $3 == "github" {
         for (i = 4; i <= NF; i++) if ($i == "task=" task) { print; break }

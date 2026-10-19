@@ -249,6 +249,7 @@ cmd_retire() {
   task=$2
   valid_task "$task" || die "retire needs --task <id>"
   [ ! -L "$PENDING" ] && [ ! -L "$PENDING/$task" ] || die "unsafe pending credential directory"
+  ledger_append "retire github task=$task result=attempted" || die "could not record credential retirement"
   . "$SCRIPT_DIR/fm-classify-lib.sh"
   for entry in "$PENDING/$task"/*; do
     [ -e "$entry" ] || [ -L "$entry" ] || continue
@@ -526,13 +527,14 @@ ledger_current() { # <task>
       fp = field("fp"); expires = field("expires"); repo = field("repo"); access = field("access")
       revoked = 0; failed = "-"; alerted = 0; have = 1; next
     }
+    $2 == "retire" || ($2 == "revoke" && field("via") == "host") { retiring = 1 }
     !have { next }
     $2 == "refresh" && field("result") == "delivered" {
       fp = field("fp"); expires = field("expires"); failed = "-"; alerted = 0; next
     }
     $2 == "refresh" { failed = $1; if (field("alerted") == "yes") alerted = 1; next }
     $2 == "revoke" && field("fp") == fp && (field("result") == "revoked" || field("result") == "invalid" || field("result") == "expired") { revoked = 1 }
-    END { if (have) print fp, expires, repo, access, revoked, failed, alerted }' "$LEDGER" 2>/dev/null) || return 1
+    END { if (have && !retiring) print fp, expires, repo, access, revoked, failed, alerted }' "$LEDGER" 2>/dev/null) || return 1
   [ -n "$line" ] || return 1
   read -r CUR_FP CUR_EXPIRES CUR_REPO CUR_ACCESS CUR_REVOKED CUR_FAILED_AT CUR_ALERTED <<< "$line"
 }

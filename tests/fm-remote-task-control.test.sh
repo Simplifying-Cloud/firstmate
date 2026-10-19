@@ -1049,6 +1049,12 @@ test_retire_revokes_a_stored_app_token() {
   expect_code 1 "$rc" "a failed revoke blocks retirement"$'\n'"$out"
   assert_contains "$out" "gh_token_revoke=failed" "a revoke GitHub did not confirm is reported as failed"
   assert_absent "$TASK_HOME/state/$ID.retired" "an unconfirmed revoke keeps retirement retryable"
+  assert_present "$TASK_HOME/state/$ID.teardown-passed" "teardown passed before the revoke failed"
+  refresh_input "$REFRESH_SECRET" > "$CASE/refresh"
+  out=$(run_control cred-refresh "$ID" < "$CASE/refresh" 2>&1); rc=$?
+  expect_code 1 "$rc" "a task awaiting revocation refuses refresh"
+  assert_contains "$out" "has passed teardown" "refresh refusal identifies the completed teardown"
+  assert_equals "$APP_SECRET" "$(cat "$ACCOUNT_HOME/.config/gh/hosts.yml")" "refused refresh preserves the retiring token"
   printf '204\n' > "$CASE/gh-revoke-status"
   out=$(run_control retire "$ID" 2>&1); rc=$?
   expect_code 0 "$rc" "a later confirmed revoke completes retirement"$'\n'"$out"

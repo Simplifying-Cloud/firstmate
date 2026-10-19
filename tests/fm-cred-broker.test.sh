@@ -54,6 +54,10 @@ if [ -f "$FM_FAKE_GITHUB_DIR/before-control-lock" ] && [ "${!#}" = "$FM_HOME/sta
   case "$action" in
     cleanup) rm "$FM_HOME/state/t-race.meta" ;;
     retire) "$FM_FAKE_BROKER" github retire --task t-race > "$FM_FAKE_GITHUB_DIR/retire.out" || exit 91 ;;
+    retire-failed)
+      printf '502\n' > "$FM_FAKE_GITHUB_DIR/delete-status"
+      if "$FM_FAKE_BROKER" github retire --task t-race > "$FM_FAKE_GITHUB_DIR/retire.out" 2>&1; then exit 91; fi
+      ;;
     *) exit 92 ;;
   esac
   printf '%s\n' "$action" > "$FM_FAKE_GITHUB_DIR/lock-transition"
@@ -413,7 +417,7 @@ test_api_refusals_and_a_repository_mismatch() {
   assert_absent "$CASE/out/a.token" "a mismatched token is never written"
   assert_equals "DELETE /installation/token 204" "$(tail -n 1 "$GH_DIR/calls.log")" "the mismatched token is revoked at once"
   assert_equals 1 "$(grep -c . "$GH_DIR/revoked")" "exactly the mismatched token is revoked"
-  assert_contains "$(ledger_line 4)" "reason=repository" "a mismatch is recorded"
+  assert_contains "$(tail -n 1 "$LEDGER")" "reason=repository" "a mismatch is recorded"
   assert_equals 0 "$(grep -c ' mint github ' "$LEDGER")" "no refused token is recorded as minted"
   assert_no_jwt_in_argv "refused mints"
   assert_no_token_anywhere "refused mints"
@@ -664,7 +668,7 @@ test_refresh_skips_fresh_locked_retired_and_unminted_tasks() {
 
 test_refresh_rechecks_eligibility_after_lock() {
   local action
-  for action in cleanup retire; do
+  for action in cleanup retire retire-failed; do
     new_case "lock-race-$action"
     if [ "$action" = cleanup ]; then sandbox_task t-race scout; else sandbox_task t-race ship; fi
     launch_mint t-race read 600
@@ -680,6 +684,13 @@ test_refresh_rechecks_eligibility_after_lock() {
     if [ "$action" = cleanup ]; then
       assert_absent "$HOME_DIR/state/t-race.meta" "the scout was cleaned up"
       assert_equals 0 "$(deletes)" "scout cleanup leaves its token to expire"
+    elif [ "$action" = retire-failed ]; then
+      assert_equals 1 "$(deletes)" "retirement attempted revocation"
+      assert_equals 1 "$(pending_count t-race)" "failed retirement retains the live token"
+      advance_clock 600
+      refresh_due
+      assert_equals 1 "$(posts)" "retirement remains ineligible on later refresh passes"
+      assert_equals "" "$(queued_keys)" "later passes queue no wake"
     else
       assert_equals 1 "$(deletes)" "retirement revoked the task token"
       assert_equals 0 "$(pending_count t-race)" "retirement cleared pending credentials"

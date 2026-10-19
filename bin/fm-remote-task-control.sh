@@ -1046,6 +1046,8 @@ cmd_cred_refresh() {
   local id=$1 bytes line value='' seen=0 fp
   [ ! -e "$TARGET_HOME/state/$id.retired" ] && [ ! -L "$TARGET_HOME/state/$id.retired" ] \
     || die "task $id is retired on this host, so its GitHub token is never refreshed"
+  [ ! -e "$TARGET_HOME/state/$id.teardown-passed" ] && [ ! -L "$TARGET_HOME/state/$id.teardown-passed" ] \
+    || die "task $id has passed teardown on this host, so its GitHub token is never refreshed"
   umask 077
   PROVISION_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-task-cred-refresh.XXXXXX") \
     || die "cannot create private credential refresh state"

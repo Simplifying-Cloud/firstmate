@@ -560,6 +560,7 @@ test_ssh_255_preserves_everything_until_a_rerun() {
   expect_code 255 "$RC" "an unreachable host's retire"$'\n'"$OUT"
   assert_contains "$OUT" "unknown completion (SSH exit 255)" "the uncertain outcome is named"
   assert_preserved "an unreachable host"
+  assert_contains "$(cat "$PRIMARY/state/cred-ledger")" "retire github task=$ID result=attempted" "retirement is recorded even when the host cannot be reached"
   assert_present "$HOST_HOME/state/$ID.meta" "the host's record changed although its retire never ran"
 
   # The host retired but its answer was lost: still unknown here.

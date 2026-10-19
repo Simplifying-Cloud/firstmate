@@ -59,7 +59,7 @@ Facts established live:
 
 Driven through the Herdr lab pane against the delayed mock:
 
-- Exit: `/exit` plus Enter left the TUI to the shell prompt; two Ctrl-C presses also exit. The exit path's composer-empty precondition is what the 2026-10-17 `unknown` refusal broke; the cursorless composer verification is owned by [runtime backends](runtime-backends.md#opencode-2-auto-mode-composer-2026-10-17-2026-10-18).
+- Exit: `/exit` plus Enter left the TUI to the shell prompt; two Ctrl-C presses also exit. The shared cursorless composer proof is owned by [runtime backends](runtime-backends.md#opencode-2-auto-mode-composer-2026-10-17-2026-10-18).
 - Interrupt: the first Escape renders `esc again to interrupt` in the footer; a second press about 0.5s later interrupted (`session.execution.interrupted reason=user`, composer left empty), while a second press about 1.5s later left the armed hint standing without interrupting, so the control table arms on that hint and keeps the devin-grade 0.5s gap.
 - Resume: relaunching with `--continue --prompt …` restored the previous session's transcript and auto-submitted the prompt (the busy record opened and settled with no manual send), unlike 1.x where `--prompt` does not auto-submit alongside `--continue`.
 - Busy-queued Enter: while a turn ran, typed text stayed in the composer after Enter and the message was enqueued (`session.inbox.enqueued` with `delivery:"steer"`), then delivered when the turn ended - the same shape as 1.18.4.

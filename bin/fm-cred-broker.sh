@@ -58,8 +58,11 @@
 # record-revoke records the revoke a sandbox host's retire made with the task's
 # stored token, which bin/fm-teardown.sh relays from the host's report.
 # retire --task drains every pending mint for the task, recording revoked,
-# invalid, or expired before removal; failed or unreadable entries fail the
-# command and preserve the sandbox at the supervising teardown boundary.
+# invalid, or expired before removal. Pending-set readers discard safe files
+# without a parseable ghs_ token and record mint-failed reason=tokenless
+# outcome=unknown; these placeholders cannot block retirement. Unsafe files or
+# failed revocations fail the command and preserve the sandbox at the
+# supervising teardown boundary.
 # Scouts and --force skip this gate and retain their expiry-only behavior.
 #
 # state/cred-ledger is append-only, created mode 0600, and holds one event per
@@ -67,6 +70,7 @@
 # token's SHA-256:
 #   <epoch> mint github task=<id> repo=<owner/name> access=<a> expires=<iso> fp=<fp> purpose=launch|refresh
 #   <epoch> mint-failed github task=<id> repo=<owner/name> access=<a> purpose=<p> reason=<slug> [outcome=unknown]
+#   <epoch> mint-failed github task=<id> reason=tokenless outcome=unknown
 #   <epoch> refresh github task=<id> fp=<fp> expires=<iso> result=delivered
 #   <epoch> refresh github task=<id> result=failed|unknown reason=<slug> alerted=yes|no [fp=<fp>]
 #   <epoch> revoke github task=<id> fp=<fp> result=revoked|invalid|expired|failed [reason=<slug>] [via=host]

@@ -311,9 +311,10 @@
 #   (bin/fm-sandbox-credentials-lib.sh); it exists only in this process and the
 #   transport's stdin, never in a file, an argument, or the record.
 #   A failure before launch destroys the sandbox, which holds no work, and
-#   removes the provisional record; a GitHub App token minted for it is
-#   revoked then too (bin/fm-cred-broker.sh), and kept once a worker may be
-#   using it. Once launch may have started - any launch
+#   removes the provisional record; cleanup attempts revocation of its App
+#   token through bin/fm-cred-broker.sh, whose pending set retains unconfirmed
+#   revocations. Cleanup leaves the token alone once a worker may be using it.
+#   Once launch may have started - any launch
 #   failure, a malformed route block, or a failed record update or backlog
 #   transition - the sandbox is held and the record kept, so the route stays
 #   reachable for reconciliation. An SSH exit 255 from the readiness gate,
@@ -1863,8 +1864,8 @@ spawn_sandbox_task() {
     exit 1
   }
 
-  # The provisioning manifest, built before the sandbox so that a credential
-  # an app source mints, or fails to mint, never meets a sandbox it outlives.
+  # The provisioning manifest is built before sandbox creation so a refused
+  # App mint cannot leave a sandbox to clean up.
   # It lives only in this process and the transport's stdin, never in a file
   # or an argument.
   if ! manifest=$(sandbox_manifest); then

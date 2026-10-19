@@ -66,7 +66,7 @@ A launch that never published its final record still needs operator reconciliati
 ## Credentials
 
 Sandbox credentials are Pi API-key providers plus per-repository GitHub tokens only.
-They reach a sandbox only in its provisioning manifest, or for a refreshed GitHub App token on the stdin of its host's `cred-refresh` verb, are written only on the sandbox host with mode 0600, and never appear in output, logs, or task records; [host-side task control](#host-side-task-control) owns where they land.
+They reach a sandbox only in its provisioning manifest, or for a refreshed GitHub App token on the stdin of its host's `cred-refresh` verb, are stored there with mode 0600, and never appear in operational output, logs, or task records; [host-side task control](#host-side-task-control) owns where they land.
 Project origins containing embedded passwords are refused before sandbox creation.
 The local, captain-owned `config/sandbox-credentials` selects which of them each task receives, by harness, model provider, delivery mode, and project; [the configuration reference](configuration.md#sandbox-credentials-configsandbox-credentials) owns its format.
 Host keys are pinned by the provider, not trusted on first use, and the SSH configuration the sandbox aliases live in is provider-managed.
@@ -76,13 +76,12 @@ A GitHub credential whose source is `app` is a GitHub App installation token ins
 The App's private key never leaves this home; [the configuration reference](configuration.md#github-app-configgithub-app) owns `config/github-app` and the App's permissions.
 
 - While the task runs, the watcher refreshes the token about 15 minutes before it expires, pushing a fresh one to the host's `cred-refresh` verb, which stores it the way provisioning did.
-The supervisor retains every minted token in a private pending-revoke set, revokes superseded tokens after confirmed delivery, and attempts revocation after refused or unknown delivery.
+The supervisor retains received tokens for cleanup under the [broker's pending-revoke contract](../bin/fm-cred-broker.sh).
 - A failed refresh is retried every few minutes and queues one `check: sandbox <id> credential refresh failed` wake per token, before that token expires; the [broker's header](../bin/fm-cred-broker.sh) owns the fixed cadence and bounds.
-- A ship's retirement remains retryable until the supervisor's pending-revoke set is empty: each entry must be confirmed revoked or reach its own expiry, with the closure reason recorded.
-The [broker's header](../bin/fm-cred-broker.sh) owns the protected storage and retirement contract.
-A token minted for a spawn that never launched is revoked before the spawn exits.
+- A ship's retirement remains retryable until its received App tokens are confirmed dead under the [broker's retirement contract](../bin/fm-cred-broker.sh).
+A failed spawn attempts revocation before exiting if launch could not have started; an unconfirmed revoke leaves the token protected on the supervisor until cleanup or expiry.
 - A scout's token, and a ship's under `--force`, are not revoked on the host: they end with the sandbox's destruction and their own expiry.
-- Every mint, refresh, and revoke is recorded in this home's `state/cred-ledger` with its repository, access, expiry, and a fingerprint, never the token.
+- Credential events are recorded without token values in this home's `state/cred-ledger`; the [broker's header](../bin/fm-cred-broker.sh) owns the fields for each event and the limit when a mint response never supplies a token.
 
 ## Configure a provider
 
@@ -202,7 +201,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 - `control` applies the [control plane's absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone) on the host before reclaiming a missing endpoint.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 
-Credentials are written only on the host: Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token into the account's gh credential store for github.com, each mode 0600.
+On the host, Pi entries are stored in the account's `~/.pi/agent/auth.json` and the GitHub token in the account's gh credential store for github.com, each mode 0600.
 Provision requires gh when a GitHub token is supplied, passes the token to `gh auth login --insecure-storage --with-token` on stdin, and restores the previous gh configuration if provisioning fails.
 Storing the repository token in gh deliberately replaces passing `GH_TOKEN`: gh and git authenticate with the stored token exactly as they would with `GH_TOKEN`.
 Git uses the absolute `gh auth git-credential` helper scoped to HTTPS github.com for the clone and its worktrees, and a no-mistakes ship's gate repository receives the same helper so the pipeline can fetch a private origin's trusted default branch through it; the token never enters command arguments or the launch environment.

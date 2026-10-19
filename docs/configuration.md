@@ -574,7 +574,7 @@ Each non-blank line that does not start with `#` names one credential as whitesp
 ```text
 <name> <destination> <source> [<condition>...]
 gh-firstmate  github      /home/me/.config/firstmate/gh-firstmate.token  project=firstmate
-gh-app        github      app                                            project=firstmate,proxmox-lab
+gh-app        github      app                                            project=proxmox-lab
 minimax       pi:minimax  /home/me/.config/firstmate/minimax.key
 ```
 
@@ -614,7 +614,8 @@ workflows=on
 
 `app_id`, `installation_id`, and `private_key` are required; unknown or repeated keys, a non-numeric ID, a `workflows` value other than `on` or `off`, and a key file that is not a PEM RSA private key are refused with the concrete problem named.
 Blank lines and `#` comments are accepted, and the file itself must pass the same file-safety rules as the key.
-Create the App as a private App owned by the account that owns the task repositories, without a webhook, and install it on only the repositories sandbox tasks may touch.
+Create the App as a private App owned by the account that owns the task repositories, without a webhook, and install it on the repositories sandbox tasks may touch.
+The installation may cover additional repositories; each task token is still restricted to its one repository.
 It needs these repository permissions, the most a ship's token requests:
 
 - Metadata: read

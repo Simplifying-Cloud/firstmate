@@ -44,6 +44,24 @@ fi
 SH
 chmod +x "$FAKEBIN/date"
 
+REAL_LN=$(command -v ln)
+export REAL_LN
+cat > "$FAKEBIN/ln" <<'SH'
+#!/usr/bin/env bash
+if [ -f "$FM_FAKE_GITHUB_DIR/before-control-lock" ] && [ "${!#}" = "$FM_HOME/state/.control-t-race.lock" ]; then
+  action=$(cat "$FM_FAKE_GITHUB_DIR/before-control-lock")
+  rm "$FM_FAKE_GITHUB_DIR/before-control-lock"
+  case "$action" in
+    cleanup) rm "$FM_HOME/state/t-race.meta" ;;
+    retire) "$FM_FAKE_BROKER" github retire --task t-race > "$FM_FAKE_GITHUB_DIR/retire.out" || exit 91 ;;
+    *) exit 92 ;;
+  esac
+  printf '%s\n' "$action" > "$FM_FAKE_GITHUB_DIR/lock-transition"
+fi
+exec "$REAL_LN" "$@"
+SH
+chmod +x "$FAKEBIN/ln"
+
 advance_clock() {
   local offset
   offset=$(cat "$GH_DIR/clock-offset" 2>/dev/null || echo 0)
@@ -644,6 +662,33 @@ test_refresh_skips_fresh_locked_retired_and_unminted_tasks() {
   pass "refresh-due leaves fresh, locked, spawning, retired, and unminted tasks alone"
 }
 
+test_refresh_rechecks_eligibility_after_lock() {
+  local action
+  for action in cleanup retire; do
+    new_case "lock-race-$action"
+    if [ "$action" = cleanup ]; then sandbox_task t-race scout; else sandbox_task t-race ship; fi
+    launch_mint t-race read 600
+    printf '%s\n' "$action" > "$GH_DIR/before-control-lock"
+    refresh_due FM_FAKE_BROKER="$BROKER"
+    expect_code 0 "$RC" "refresh skips a task changed before lock acquisition"$'\n'"$ERR"
+    assert_equals "$action" "$(cat "$GH_DIR/lock-transition")" "the lifecycle transition ran before lock acquisition"
+    assert_equals 1 "$(posts)" "a task that lost eligibility receives no refresh mint"
+    assert_equals "" "$OUT" "skipping stale eligibility is silent"
+    assert_equals "" "$(queued_keys)" "skipping stale eligibility queues no wake"
+    assert_absent "$CASE/ssh.log" "no refresh is delivered"
+    assert_absent "$HOME_DIR/state/.control-t-race.lock" "the control lock is released"
+    if [ "$action" = cleanup ]; then
+      assert_absent "$HOME_DIR/state/t-race.meta" "the scout was cleaned up"
+      assert_equals 0 "$(deletes)" "scout cleanup leaves its token to expire"
+    else
+      assert_equals 1 "$(deletes)" "retirement revoked the task token"
+      assert_equals 0 "$(pending_count t-race)" "retirement cleared pending credentials"
+    fi
+    assert_no_token_anywhere "eligibility changed before lock"
+  done
+  pass "refresh rechecks route and ledger eligibility under the control lock"
+}
+
 test_refresh_failure_wakes_once_and_retries() {
   local fp1 out1
   new_case fail
@@ -901,6 +946,7 @@ test_revoke_kills_a_token_and_records_it
 test_record_revoke_validates_the_host_report
 test_refresh_due_replaces_an_expiring_token_on_its_host
 test_refresh_skips_fresh_locked_retired_and_unminted_tasks
+test_refresh_rechecks_eligibility_after_lock
 test_refresh_failure_wakes_once_and_retries
 test_unknown_delivery_revokes_the_token
 test_failed_revoke_still_refreshes

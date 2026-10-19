@@ -561,6 +561,16 @@ refresh_failed() { # <task> <result> <reason> <diagnostic> [<minted-fp>]
 }
 
 refresh_task() { # <task>
+  local task=$1
+  ! lock_live "$STATE/.spawn-$task.lock" || return 0
+  fm_lock_try_acquire "$STATE/.control-$task.lock" || return 0
+  if fm_remote_route_resolve "$STATE/$task.meta" "$task" && [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+    refresh_task_locked "$task"
+  fi
+  fm_lock_release "$STATE/.control-$task.lock" || true
+}
+
+refresh_task_locked() {
   local task=$1 now expires_at rc out back
   ledger_current "$task" || return 0
   [ "$CUR_REVOKED" = 0 ] || return 0
@@ -576,14 +586,11 @@ refresh_task() { # <task>
     *[!0-9]*) ;;
     *) [ "$((now - CUR_FAILED_AT))" -ge "$RETRY_SECS" ] || return 0 ;;
   esac
-  ! lock_live "$STATE/.spawn-$task.lock" || return 0
-  fm_lock_try_acquire "$STATE/.control-$task.lock" || return 0
   ACTIVE_TASK=$task
   DELIVERY_CONFIRMED=0
   work_dir
   rm -f -- "$WORK/token"
   if ! github_mint "$task" "$CUR_REPO" "$CUR_ACCESS" refresh "$WORK/token"; then
-    fm_lock_release "$STATE/.control-$task.lock" || true
     refresh_failed "$task" failed mint "$MINT_DIAG"
     return 0
   fi
@@ -598,11 +605,9 @@ refresh_task() { # <task>
     DELIVERY_CONFIRMED=1
     ledger_append "refresh github task=$task fp=$MINT_FP expires=$MINT_EXPIRES result=delivered" || true
     pending_revoke_fp "$task" "$CUR_FP" || true
-    fm_lock_release "$STATE/.control-$task.lock" || true
     return 0
   fi
   revoke_undelivered "$task"
-  fm_lock_release "$STATE/.control-$task.lock" || true
   if [ "$rc" -eq 0 ]; then
     refresh_failed "$task" unknown unconfirmed "the sandbox host did not confirm it stored the new token" "$MINT_FP"
   elif [ "$rc" -eq 255 ]; then

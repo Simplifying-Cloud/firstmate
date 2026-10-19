@@ -700,6 +700,35 @@ test_refresh_rechecks_eligibility_after_lock() {
   pass "refresh rechecks route and ledger eligibility under the control lock"
 }
 
+test_refresh_resumes_for_a_reused_task_id() {
+  new_case reused-task
+  sandbox_task t-reused
+  launch_mint t-reused write 600
+  run_broker github retire --task t-reused
+  expect_code 0 "$RC" "the original task completes credential retirement"$'\n'"$ERR"
+  assert_equals 0 "$(pending_count t-reused)" "the original task has no pending credentials"
+  refresh_due
+  expect_code 0 "$RC" "the retired task is skipped"
+  assert_equals 1 "$(posts)" "retirement does not renew the original token"
+  assert_absent "$CASE/ssh.log" "the retired task receives no refresh"
+
+  rm -rf "$HOST_DIR"
+  rm "$HOME_DIR/state/t-reused.meta"
+  sandbox_task t-reused
+  launch_mint t-reused write 600
+  refresh_due
+  expect_code 0 "$RC" "the new incarnation refreshes successfully"$'\n'"$ERR"
+  assert_equals 3 "$(posts)" "the reused id receives a launch token and a refresh token"
+  minted_token 3 "$CASE/reused-refreshed.token"
+  cmp -s "$CASE/reused-refreshed.token" "$HOST_ACCOUNT/.config/gh/hosts.yml" \
+    || fail "the new incarnation did not receive its refreshed token"
+  assert_equals 1 "$(pending_count t-reused)" "only the new current token remains pending"
+  assert_equals "" "$OUT" "the successful refresh is silent"
+  assert_equals "" "$(queued_keys)" "reuse queues no failure wake"
+  assert_no_token_anywhere "refreshing a reused task id"
+  pass "a new launch mint restores refresh eligibility for a retired task id"
+}
+
 test_refresh_failure_wakes_once_and_retries() {
   local fp1 out1
   new_case fail
@@ -958,6 +987,7 @@ test_record_revoke_validates_the_host_report
 test_refresh_due_replaces_an_expiring_token_on_its_host
 test_refresh_skips_fresh_locked_retired_and_unminted_tasks
 test_refresh_rechecks_eligibility_after_lock
+test_refresh_resumes_for_a_reused_task_id
 test_refresh_failure_wakes_once_and_retries
 test_unknown_delivery_revokes_the_token
 test_failed_revoke_still_refreshes

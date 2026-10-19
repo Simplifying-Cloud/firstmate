@@ -525,7 +525,7 @@ ledger_current() { # <task>
     $3 != "github" || field("task") != task { next }
     $2 == "mint" && field("purpose") == "launch" {
       fp = field("fp"); expires = field("expires"); repo = field("repo"); access = field("access")
-      revoked = 0; failed = "-"; alerted = 0; have = 1; next
+      revoked = 0; retiring = 0; failed = "-"; alerted = 0; have = 1; next
     }
     $2 == "retire" || ($2 == "revoke" && field("via") == "host") { retiring = 1 }
     !have { next }

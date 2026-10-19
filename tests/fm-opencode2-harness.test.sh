@@ -346,6 +346,38 @@ test_oc2_plugin_classifies_from_execution_events() {
   pass "opencode2 plugin classifies from session.execution events, scoped to the latched worker session"
 }
 
+# Regression for the 2026-10-17 post-teardown signal: TUI exit fired a final
+# busy-plugin settle that raced teardown's record removal and recreated
+# state/<id>.turn-ended for a task whose records teardown had already deleted.
+# Teardown retires the busy contract before removing the notification, so the
+# plugin's settle must ride the same gen-guarded writer call and be refused
+# whole once the task is torn down.
+test_oc2_plugin_cannot_resurrect_records_after_retire() {
+  local rec id=oc2-plugin-retire out state plugin
+  rec=$(make_oc2_spawn_case plugin-retire "$id")
+  read_oc2_spawn_record "$rec"
+  out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
+  expect_code 0 "$?" "opencode2 spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  assert_present "$plugin" "opencode2 spawn did not write the busy-state plugin"
+  # Teardown's ordering for a live task: retire the busy contract (the meta's
+  # exact gen), then remove the turn-ended notification and its seen marker.
+  "$ROOT/bin/fm-busy-event.sh" retire "$state" "$id" --current-gen \
+    || fail "retire failed"
+  rm -f "$state/$id.turn-ended"
+  # The racing final settle: TUI exit can run one last execution cycle, so the
+  # latch catches a started before the settle that must be refused whole.
+  out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_event session.execution.started ses_main)" \
+    "$(oc2_event session.execution.succeeded ses_main)") || fail "post-retire drive failed: $out"
+  [ ! -e "$state/$id.turn-ended" ] || fail "a post-retire settle recreated the turn-ended notification"
+  [ ! -e "$state/$id.busy-state" ] || fail "a post-retire settle recreated the busy record"
+  out=$(classify "$id" "$state")
+  [ "$out" = "unknown missing" ] || fail "post-retire settle changed classification, got '$out'"
+  pass "an opencode2 settle racing teardown cannot resurrect task records"
+}
+
 test_oc2_control_mechanics_are_the_verified_ones() {
   local out
   [ "$(fm_control_harness_family opencode2)" = opencode2 ] || fail "opencode2 must be its own control family"
@@ -376,5 +408,7 @@ test_oc2_binary_resolution_refuses_without_2x \
   test_oc2_secondmate_is_refused \
   &&
   test_oc2_plugin_classifies_from_execution_events \
+  &&
+  test_oc2_plugin_cannot_resurrect_records_after_retire \
   &&
   test_oc2_control_mechanics_are_the_verified_ones

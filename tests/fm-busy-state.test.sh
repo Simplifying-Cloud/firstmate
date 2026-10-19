@@ -71,6 +71,42 @@ test_apply_current_gen_reset() {
   pass "firstmate-owned interrupt and recovery events bind to the current gen"
 }
 
+test_apply_touch_turnend_rides_the_gen_guard() {
+  local state gen
+  state=$(new_state_dir apply-touch)
+  gen=$("$EV" arm "$state" t1)
+  "$EV" apply "$state" t1 idle --gen "$gen" --source opencode-plugin \
+    --event execution-succeeded --touch-turnend || fail "guarded apply failed"
+  [ -f "$state/t1.turn-ended" ] || fail "an accepted settle must touch the notification"
+  # Teardown's ordering: retire the busy contract first, remove the
+  # notification right after. A settle that lands after the retirement - the
+  # teardown race - must be refused whole.
+  "$EV" retire "$state" t1 --gen "$gen" || fail "retire failed"
+  rm -f "$state/t1.turn-ended"
+  if "$EV" apply "$state" t1 idle --gen "$gen" --source opencode-plugin \
+    --event execution-succeeded --touch-turnend 2>/dev/null; then
+    fail "a settle after retirement must be refused"
+  fi
+  [ ! -e "$state/t1.turn-ended" ] || fail "a refused settle recreated the turn-ended notification"
+  [ ! -e "$state/t1.busy-state" ] || fail "a refused settle recreated the busy record"
+  # A stale incarnation's settle on a live task is refused whole too: the
+  # current incarnation owns the notification.
+  "$EV" arm "$state" t1 >/dev/null
+  if "$EV" apply "$state" t1 idle --gen gstale.9.9 --source opencode-plugin \
+    --event execution-succeeded --touch-turnend 2>/dev/null; then
+    fail "a stale-gen settle must be refused"
+  fi
+  [ ! -e "$state/t1.turn-ended" ] || fail "a stale-gen settle touched the notification"
+  # The flag is an apply-only binding: other subcommands reject it.
+  if "$EV" progress "$state" t1 --gen gstale.9.9 --touch-turnend 2>/dev/null; then
+    fail "progress must not accept --touch-turnend"
+  fi
+  if "$EV" retire "$state" t1 --current-gen --touch-turnend 2>/dev/null; then
+    fail "retire must not accept --touch-turnend"
+  fi
+  pass "the turn-ended touch rides the gen guard: refused settles never recreate the notification"
+}
+
 test_apply_unarmed_refused() {
   local state
   state=$(new_state_dir apply-unarmed)
@@ -598,6 +634,7 @@ test_progress_is_generation_bound_and_not_semantic_state
 test_arm_seeds_busy_spawn
 test_apply_advances_seq_and_source
 test_apply_current_gen_reset
+test_apply_touch_turnend_rides_the_gen_guard
 test_apply_unarmed_refused
 test_retire_serializes_and_rejects_stale_gen
 test_retire_missing_sidecar_is_idempotent

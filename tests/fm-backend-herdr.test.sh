@@ -4830,6 +4830,23 @@ herdr_popup_composer_screen() {  # <typed-text>
   printf '  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on\n'
 }
 
+# herdr_selected_menu_composer_screen: the Claude Code 2.1.303 shape (verified
+# live on Herdr 0.9.1): the composer at column 0 between solid rules shows
+# <composer>, and the slash-command menu directly below the closing rule leads
+# its selected row with the composer's own `❯`. The full-viewport read takes
+# that menu row as the composer, which broke fm-control exit again.
+herdr_selected_menu_composer_screen() {  # <composer>
+  local rule
+  rule=$(printf '%0.s\xe2\x94\x80' $(seq 1 60))
+  printf '%s\n' "$rule"
+  printf '\xe2\x9d\xaf %s\n' "$1"
+  printf '%s\n' "$rule"
+  printf '  \xe2\x9d\xaf /exit                    Exit the CLI\n'
+  printf '    /context                 Visualize current context usage as a colored grid\n'
+  printf '    /usage-credits           Configure usage credits or request them from your admin\n'
+  printf '                             when you hit a limit\n'
+}
+
 test_send_text_submit_long_literal_submits_when_composer_holds_every_byte() {
   local dir log resp fb out enter_count text
   dir="$TMP_ROOT/submit-long-exact"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
@@ -5058,6 +5075,55 @@ test_send_text_submit_claude_slash_popup_composer_is_still_proven_and_submitted(
     || fail "the payload proof must use the visible viewport"
   [ "$(grep -c $'\x1f''--lines' "$log")" -eq 0 ] || fail "no composer read may be a bounded --lines tail"
   pass "fm_backend_herdr_send_text_submit: a typed slash command hidden behind its popup is still proven and submitted"
+}
+
+test_send_text_submit_claude_selected_menu_row_does_not_hide_typed_command() {
+  local dir log resp fb out enter_count text
+  dir="$TMP_ROOT/submit-claude-selected-menu"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  text='/exit'
+  herdr_submit_claude_prefix "$resp" "$text"
+  herdr_selected_menu_composer_screen "$text" > "$resp/4.out"
+  printf '{"result":{"agent":{"agent":"claude","agent_status":"idle"}}}\n' > "$resp/5.out"
+  printf '{"result":{"agent":{"agent_status":"working"}}}\n' > "$resp/7.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_send_text_submit default:w1:p2 "$1" 3 0.01 0.01' "$ROOT" "$text" )
+  [ "$out" = empty ] || fail "a typed /exit above a menu whose selected row leads with the composer glyph must be submitted, got '$out'"
+  enter_count=$(grep -c $'\x1f''pane'$'\x1f''send-keys'$'\x1f''w1:p2'$'\x1f''enter' "$log")
+  [ "$enter_count" -eq 1 ] || fail "the proven typed command should be submitted once, sent $enter_count Enter(s)"
+  [ "$(herdr_ctrl_u_count "$log")" -eq 0 ] || fail "a proven composer must not be cleared"
+  pass "fm_backend_herdr_send_text_submit: Claude 2.1.303's selected menu row does not hide a typed /exit"
+}
+
+test_send_text_submit_claude_selected_menu_row_does_not_prove_a_suffix() {
+  local dir log resp fb out enter_count text
+  dir="$TMP_ROOT/submit-claude-selected-menu-suffix"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  text='/exit'
+  herdr_submit_claude_prefix "$resp" "$text"
+  herdr_selected_menu_composer_screen 'xit' > "$resp/4.out"
+  printf '  \xe2\x9d\xaf\n' > "$resp/6.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_send_text_submit default:w1:p2 "$1" 3 0.01 0.01' "$ROOT" "$text" )
+  [ "$out" = send-failed ] || fail "a composer holding only a suffix must be refused even when the menu row shows the whole command, got '$out'"
+  enter_count=$(grep -c $'\x1f''pane'$'\x1f''send-keys'$'\x1f''w1:p2'$'\x1f''enter' "$log")
+  [ "$enter_count" -eq 0 ] || fail "a suffix must not be submitted, sent $enter_count Enter(s)"
+  [ "$(herdr_ctrl_u_count "$log")" -eq 1 ] || fail "the refused suffix should be cleared, sent $(herdr_ctrl_u_count "$log") Ctrl+U"
+  pass "fm_backend_herdr_send_text_submit: the menu's selected /exit row never proves a truncated composer"
+}
+
+test_send_text_submit_claude_leftover_command_with_menu_is_refused_before_typing() {
+  local dir log resp fb out
+  dir="$TMP_ROOT/submit-claude-selected-menu-leftover"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"result":{"agent":{"agent":"claude","agent_status":"idle"}}}\n' > "$resp/1.out"
+  herdr_selected_menu_composer_screen '/exit' > "$resp/2.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_send_text_submit default:w1:p2 "$1" 3 0.01 0.01' "$ROOT" '/exit' )
+  [ "$out" = send-failed ] || fail "a leftover /exit with its menu open must refuse the send, got '$out'"
+  [ "$(grep -c $'\x1f''pane'$'\x1f''send-text' "$log")" -eq 0 ] || fail "nothing may be typed onto a leftover command"
+  [ "$(grep -c $'\x1f''pane'$'\x1f''send-keys' "$log")" -eq 0 ] || fail "a refused pre-send composer must not receive any key"
+  pass "fm_backend_herdr_send_text_submit: a leftover command with Claude's menu open is refused before anything is typed"
 }
 
 # Live Claude Code 2.1.283 draws a recognized typed slash command in muted
@@ -5995,6 +6061,9 @@ test_send_text_submit_accepts_marked_payloads_whose_read_back_drops_u2063
 test_send_text_submit_refuses_marked_digest_missing_its_head
 test_composer_state_claude_slash_popup_pushes_composer_above_tail_window
 test_send_text_submit_claude_slash_popup_composer_is_still_proven_and_submitted
+test_send_text_submit_claude_selected_menu_row_does_not_hide_typed_command
+test_send_text_submit_claude_selected_menu_row_does_not_prove_a_suffix
+test_send_text_submit_claude_leftover_command_with_menu_is_refused_before_typing
 test_send_text_submit_claude_grey_slash_command_is_proven_and_submitted
 test_send_text_submit_lone_paste_placeholder_submits_the_long_payload
 test_send_text_submit_multiline_paste_placeholder_submits_the_long_payload

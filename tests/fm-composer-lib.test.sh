@@ -1141,6 +1141,52 @@ test_titled_bottom_requires_matching_width
 test_cursor_on_proven_box_bottom_classifies_content
 test_selected_content_is_composer_scoped_and_wrap_normalized
 
+# Claude Code 2.1.303 (verified live on Herdr 0.9.1) leads the selected row of
+# its slash-command menu with the composer's own `❯`, below the composer's
+# closing rule. The cursorless bottom-most rule selects that menu row, so a
+# typed /exit read back as the whole menu; the rule-closed screen ends at the
+# composer's closing rule and reads back exactly what was typed.
+test_rule_closed_screen_skips_claude_selected_menu_row() {
+  local rule screen closed out
+  rule='────────────────────────────────────────────────'
+  screen="$rule"$'\n❯ /exit\n'"$rule"$'\n  ❯ /exit                    Exit the CLI\n    /context                 Visualize current context usage\n    /usage-credits           Configure usage credits or request them from\n                             your admin when you hit a limit'
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED_NOID" "$screen")
+  [ "$out" != /exit ] || fail "the menu shape must defeat the full-screen read, or this case proves nothing (got '$out')"
+  closed=$(fm_composer_rule_closed_screen "$screen") \
+    || fail "a rule-closed Claude composer above its menu must be found"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED_NOID" "$closed")
+  [ "$out" = /exit ] || fail "the rule-closed read must show exactly the typed /exit, got '$out'"
+  # A notice row between the closing rule and the menu changes nothing.
+  screen="$rule"$'\n❯ /exit\n'"$rule"$'\n  ⚠ Transcript saving is off\n  ❯ /exit                    Exit the CLI\n    /context                 Visualize current context usage'
+  closed=$(fm_composer_rule_closed_screen "$screen") \
+    || fail "a notice row below the closing rule must not hide the composer"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED_NOID" "$closed")
+  [ "$out" = /exit ] || fail "a notice row must not change the rule-closed read, got '$out'"
+  pass "fm_composer_rule_closed_screen: Claude's selected menu row never stands in for the typed composer"
+}
+
+test_rule_closed_screen_reads_a_wrapped_composer_and_refuses_without_one() {
+  local rule screen closed out
+  rule='────────────────────────────────────────────────'
+  screen=$'transcript\n'"$rule"$'\n❯ first wrapped row of a long\n  steer that continues here\n'"$rule"$'\n  ⏵⏵ bypass permissions on'
+  closed=$(fm_composer_rule_closed_screen "$screen") || fail "a wrapped rule-closed composer must be found"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED_NOID" "$closed")
+  [ "$out" = 'first wrapped row of a long steer that continues here' ] \
+    || fail "every wrapped composer row must be read back, got '$out'"
+  # A menu row and a bare composer with no closing rule prove nothing, so the
+  # caller keeps its full-screen read.
+  screen=$'❯ /exit\n  ❯ /exit                    Exit the CLI'
+  if out=$(fm_composer_rule_closed_screen "$screen"); then
+    fail "a screen with no rule-closed composer must return 1, got '$out'"
+  fi
+  # A rule that only follows a blank row closes nothing.
+  screen="$rule"$'\n❯ typed\n\n'"$rule"
+  if out=$(fm_composer_rule_closed_screen "$screen"); then
+    fail "a rule separated from the glyph row by a blank row must not close it, got '$out'"
+  fi
+  pass "fm_composer_rule_closed_screen: reads a wrapped composer whole and returns 1 when no composer closes on a rule"
+}
+
 test_queued_enter_verdict_busy_pending_is_empty() {
   local out
   out=$(fm_composer_queued_enter_verdict pending busy)
@@ -1171,3 +1217,5 @@ test_queued_enter_verdict_does_not_convert_other_states() {
 test_queued_enter_verdict_busy_pending_is_empty
 test_queued_enter_verdict_idle_pending_stays_pending
 test_queued_enter_verdict_does_not_convert_other_states
+test_rule_closed_screen_skips_claude_selected_menu_row
+test_rule_closed_screen_reads_a_wrapped_composer_and_refuses_without_one

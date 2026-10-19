@@ -1335,9 +1335,15 @@ The pre-Enter payload proof then judged the typed command unsent, pressed Ctrl+U
 
 The fix captures the FULL VISIBLE VIEWPORT for every herdr adapter composer read (`pane read --source visible [--format ansi]`, `fm_backend_herdr_composer_state` and `fm_backend_herdr_composer_content`): the composer is by definition inside the viewport, and the viewport is the one bound that always contains it.
 The shared inbox pending-line confirmation read (`bin/fm-task-inbox-lib.sh`) stays a bounded tail on every backend, herdr included; its payloads are task lines, not slash commands, so the popup shape does not arise there.
-The popup rows sit below the composer's closing rule, which is a structural edge row, so the shared classifier still selects only the composer and the menu rows never read as typed text.
+On 2.1.283 the popup rows sit below the composer's closing rule, which is a structural edge row, so the shared classifier selected only the composer and the menu rows never read as typed text.
 Verified live in the lab: with the popup up the state read answers `pending` (previously `empty`) and the payload proof returns `/exit` (previously empty), the submit presses Enter, and the Claude process exits, leaving the shell prompt.
 Growing the window only adds rows above the composer, so the bottom-most-shape selection, the footer zone, and every previously passing verdict are unchanged.
+
+Measured again 2026-10-19 against Herdr 0.9.1 and Claude Code 2.1.303 in an isolated `fm-lab-` session.
+Claude Code 2.1.303 leads the menu's selected row with the composer's own `❯`, directly below the closing rule (`  ❯ /exit    Exit the CLI`), so the cursorless bottom-most selection took that menu row as the composer.
+The payload proof read back `/exit Exit the CLI /context Visualize current context usage ...`, judged the typed command unsent, and cleared it, and `bin/fm-control.sh exit` on an idle Claude worker died with `the exit command could not be sent to task <id> on herdr` while the agent stayed alive.
+The fix keeps the full-viewport read for the pre-send emptiness check and for every state read, and cuts only the post-send payload read-back at the closing rule of Claude's composer (`fm_composer_rule_closed_screen`): the bottom-most agent-glyph row whose wrap region ends directly on a solid rule.
+A menu row never closes on a rule, so the read-back returns `/exit`, the submit presses Enter, and `bin/fm-control.sh exit` reports `stopped` with the agent dead.
 
 Portable regressions (they fail against the bounded-tail reads and pass against the viewport reads):
 
@@ -1348,6 +1354,18 @@ tests/fm-backend-herdr.test.sh
 ```text
 ok - fm_backend_herdr_composer_state: a slash-command popup cannot hide a typed composer
 ok - fm_backend_herdr_send_text_submit: a typed slash command hidden behind its popup is still proven and submitted
+ok - fm_backend_herdr_send_text_submit: Claude 2.1.303's selected menu row does not hide a typed /exit
+ok - fm_backend_herdr_send_text_submit: the menu's selected /exit row never proves a truncated composer
+ok - fm_backend_herdr_send_text_submit: a leftover command with Claude's menu open is refused before anything is typed
+```
+
+```sh
+tests/fm-composer-lib.test.sh
+```
+
+```text
+ok - fm_composer_rule_closed_screen: Claude's selected menu row never stands in for the typed composer
+ok - fm_composer_rule_closed_screen: reads a wrapped composer whole and returns 1 when no composer closes on a rule
 ```
 
 Live guard (third scenario of the opt-in guard, verifying the agent actually exited):
@@ -1358,6 +1376,13 @@ FM_HERDR_SUBMIT_CONFIRM_LIVE=1 tests/fm-herdr-submit-confirm-live-e2e.test.sh
 
 ```text
 ok - live Herdr submit confirm: Claude Code (2.1.283 (Claude Code)) on herdr 0.9.0 proves and submits a typed /exit behind its command popup
+```
+
+On 2026-10-19 the same guard failed against the pre-fix code and passed with the fix:
+
+```text
+not ok - Claude Code (2.1.303 (Claude Code)) on herdr 0.9.1: a typed /exit behind its command popup was judged unsent and cleared instead of submitted
+ok - live Herdr submit confirm: Claude Code (2.1.303 (Claude Code)) on herdr 0.9.1 proves and submits a typed /exit behind its command popup
 ```
 
 ### Prune and respawn

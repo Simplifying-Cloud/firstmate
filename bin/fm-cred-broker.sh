@@ -257,6 +257,7 @@ cmd_retire() {
   valid_task "$task" || die "retire needs --task <id>"
   [ ! -L "$PENDING" ] && [ ! -L "$PENDING/$task" ] || die "unsafe pending credential directory"
   ledger_append "retire github task=$task result=attempted" || die "could not record credential retirement"
+  # shellcheck source=bin/fm-classify-lib.sh
   . "$SCRIPT_DIR/fm-classify-lib.sh"
   for entry in "$PENDING/$task"/*; do
     [ -e "$entry" ] || [ -L "$entry" ] || continue

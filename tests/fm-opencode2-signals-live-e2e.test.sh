@@ -192,6 +192,18 @@ composer=$(TMUX="$(tmux -L "$SOCKET" display-message -p '#{socket_path},#{pid},0
   fm_tmux_composer_state "$SESSION")
 [ "$composer" = empty ] || fail "the real --auto composer must allow lifecycle exit, got '$composer'"
 
+# The same proven-idle pane read the way every cursorless backend reads it
+# (herdr, zellij, cmux, orca: no cursor anchor, so the bottom-most shape
+# wins). OpenCode 2.x draws its own status row directly below the composer
+# floor, and before the shared classifier learned it as furniture that row
+# made every idle 2.x pane read `unknown` - the live defect that refused
+# fm-control exit on every cursorless backend (2026-10-17).
+oc2_caps=$(printf 'styled=1\ncursor=0\nidentity=1\nrows=0')
+oc2_pane=$(tmux -L "$SOCKET" capture-pane -e -p -t "$SESSION")
+oc2_cursorless=$(fm_composer_classify_screen "$oc2_caps" "$oc2_pane")
+[ "$oc2_cursorless" = empty ] \
+  || fail "the real --auto composer must also read empty cursorless (the herdr posture), got '$oc2_cursorless'"
+
 tmux -L "$SOCKET" send-keys -t "$SESSION" -l "/exit"
 tmux -L "$SOCKET" send-keys -t "$SESSION" Enter
 wait_for "OC2_EXIT=0" 60 || fail "/exit did not leave the real 2.x TUI"

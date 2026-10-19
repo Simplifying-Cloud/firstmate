@@ -2586,11 +2586,16 @@ ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.85.1
 
 [Configuration](../configuration.md#pi-main-session-provider-switch) owns the command's operator contract.
 
-## OpenCode 2 auto-mode composer (2026-10-17)
+## OpenCode 2 auto-mode composer (2026-10-17, 2026-10-18)
 
-Verified on `opencode v2.0.32` with tmux: the empty `--auto` composer ends with `Build auto · GLM-5.3-Flash GLM via organization gateway`.
-The shared classifier recognizes that final row as furniture while preserving pending text above it, including text resembling the footer.
-The live guard refreshes the real TUI composer and exit proof against a localhost mock provider; it does not prove governed-platform model completion.
+Verified on `opencode v2.0.32` (tmux 3.6, Herdr 0.9.1 lab session, Linux x86_64), launched in the fm-spawn worker posture (`--standalone --auto`, isolated config dir, platform-only policies, model `zai/glm-5.3-flash`).
+The empty `--auto` composer ends with `Build auto · GLM-5.3-Flash GLM via organization gateway`, which the shared classifier recognizes as furniture while preserving pending text above it, including text resembling the footer.
+
+OpenCode 2.x draws its own status row directly below the composer's `╹▀` floor (project path and git ref, then keybind chords when fresh, the context-usage and cost cell after a turn, `esc interrupt` plus progress dots while busy), which the cursorless staleness probe reads.
+The classifier recognizes that row as furniture (`FM_COMPOSER_OPENCODE_STATUS_RE_DEFAULT` in `bin/fm-composer-lib.sh`), and anything else directly below the floor - a dead shell or unclaimed activity - still marks the envelope stale.
+
+Live evidence, 2026-10-18: a real 2.0.32 TUI idle in an isolated `fm-lab-*` Herdr pane read `empty` through the real `fm_backend_herdr_composer_state` (the exact call `fm-control` exit makes), `pending` after `pane send-text` typed one character, and `empty` again after Backspace.
+The signals live guard now re-proves the cursorless read (`styled=1 cursor=0 identity=1`) of the real post-turn pane on every run; before this, its composer check was tmux cursor-anchored and the matrix guard's cursorless check tolerates `unknown`, so neither guard could catch the defect.
 
 ```sh
 bash bin/fm-test-run.sh tests/fm-composer-lib.test.sh
@@ -2598,6 +2603,6 @@ FM_OPENCODE2_SIGNALS_LIVE=1 bash bin/fm-test-run.sh tests/fm-opencode2-signals-l
 ```
 
 ```text
-ok - matrix: opencode's left-bar composer reads empty everywhere and scans the full active run
+ok - matrix: opencode 2.x's status row below the floor is furniture; idle, typed, busy, and stale panes keep their verdicts
 ok - opencode2 opencode v2.0.32 live: standalone TUI turn drove the generated plugin busy->idle with the notification touch, and /exit left the pane
 ```

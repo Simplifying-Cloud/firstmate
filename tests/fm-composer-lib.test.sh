@@ -710,6 +710,91 @@ test_matrix_opencode_leftbar_signals() {
   pass "matrix: opencode's left-bar composer reads empty everywhere and scans the full active run"
 }
 
+test_matrix_opencode2_status_row_below_floor() {
+  # Real OpenCode 2.0.32 worker pane (fm-spawn posture: --standalone --auto,
+  # platform-only policies, isolated config dir), captured live 2026-10-18 at
+  # 120 and 80 columns. The 2.x TUI keeps the 1.x left-bar composer - blank
+  # rows, the ghost `Ask anything…` hint at RGB 128 (exactly on the
+  # ghost-luma threshold, so the idle spelling is the empty signal), the
+  # `Build auto · <model>` footer, the `╹▀` floor - and draws its own STATUS
+  # ROW directly below the floor: the project path and git ref, then keybind
+  # chords when fresh, the context-usage and cost cell once a turn has run,
+  # `esc interrupt` plus progress dots while busy. The cursorless staleness
+  # probe reads exactly that row, and before it was taught as furniture every
+  # idle 2.x pane read `unknown` on every cursorless backend (herdr, zellij,
+  # cmux, orca) - the live defect behind `fm-control <task> exit` refusing
+  # with "composer state is 'unknown', not proven empty" (2026-10-17). tmux
+  # never hit it because its cursor anchor selects the left-bar shape
+  # directly. The busy pane's composer is genuinely empty: the submitted text
+  # was consumed and the status row carries the busy cells instead.
+  local logo fresh fresh_styled post typed busy dead activity out
+  logo=$'\n  █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█\n  ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀\n'
+  fresh=$'  ┃\n  ┃  Ask anything… "Fix broken tests"\n  ┃\n  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n  /tmp/proj:main      shift+tab agents  ctrl+p commands\n\n  2.0.32'
+  local bar
+  bar="  ${ESC}[38;2;92;156;245m┃${ESC}[38;2;255;255;255m${ESC}[48;2;30;30;30m"
+  fresh_styled="${logo}
+${bar}${ESC}[48;2;10;10;10m
+${bar}  ${ESC}[38;2;128;128;128mAsk anything… \"Fix broken tests\"${ESC}[38;2;255;255;255m${ESC}[48;2;10;10;10m
+${bar}${ESC}[48;2;10;10;10m
+${bar}  ${ESC}[38;2;92;156;245mBuild${ESC}[38;2;255;255;255m ${ESC}[38;2;128;128;128mauto${ESC}[38;2;255;255;255m ${ESC}[38;2;128;128;128m·${ESC}[38;2;255;255;255m ${ESC}[38;2;238;238;238mGLM-5.3-Flash${ESC}[38;2;255;255;255m ${ESC}[38;2;128;128;128mGLM via organization gateway${ESC}[38;2;255;255;255m${ESC}[48;2;10;10;10m
+  ${ESC}[38;2;92;156;245m╹${ESC}[38;2;30;30;30m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀${ESC}[38;2;255;255;255m
+  ${ESC}[38;2;128;128;128m/tmp/proj:main${ESC}[38;2;255;255;255m      ${ESC}[38;2;238;238;238mshift+tab ${ESC}[38;2;128;128;128magents${ESC}[38;2;255;255;255m  ${ESC}[38;2;238;238;238mctrl+p ${ESC}[38;2;128;128;128mcommands${ESC}[38;2;255;255;255m"
+  assert_screen "opencode2 fresh idle on tmux (cursor on the hint row)" empty "$CAPS_TMUX" "$fresh_styled" 5 probe-absent
+  assert_screen "opencode2 fresh idle on herdr" empty "$CAPS_STYLED" "$fresh_styled"
+  assert_screen "opencode2 fresh idle on zellij" empty "$CAPS_STYLED_NOID" "$fresh_styled"
+  assert_screen "opencode2 fresh idle on cmux/orca" empty "$CAPS_PLAIN" "$fresh"
+  # After a completed turn the transcript (including the echoed prompt's own
+  # `┃` run) sits above a hintless, blank composer: the bottom-most run wins.
+  post=$'\n  ┃\n  ┃  Write a 500-word story about a lighthouse keeper.\n  ┃\n\n     + Thought · 6ms\n\n     The old keeper lit the lamp at dusk.\n\n     Build · GLM-5.3-Flash · 2.8s · 26.9 tok/s\n\n  ┃\n  ┃\n  ┃\n  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n  /tmp/proj:main      9.9K (1%) · $0.00  ctrl+p commands'
+  assert_screen "opencode2 post-turn idle on tmux (cursor on the input row)" empty "$CAPS_TMUX" "$post" 12 probe-absent
+  assert_screen "opencode2 post-turn idle on herdr" empty "$CAPS_STYLED" "$post"
+  assert_screen "opencode2 post-turn idle on zellij" empty "$CAPS_STYLED_NOID" "$post"
+  assert_screen "opencode2 post-turn idle on cmux/orca" empty "$CAPS_PLAIN" "$post"
+  # Typed text is real bright input (RGB 238) and must stay pending on every
+  # styled profile; the plain capture keeps its standing unknown degradation.
+  typed="${logo}
+${bar}${ESC}[48;2;10;10;10m
+${bar}  ${ESC}[38;2;238;238;238mReply with OK.${ESC}[38;2;255;255;255m${ESC}[48;2;10;10;10m
+${bar}${ESC}[48;2;10;10;10m
+${bar}  ${ESC}[38;2;92;156;245mBuild${ESC}[38;2;255;255;255m ${ESC}[38;2;128;128;128mauto${ESC}[38;2;255;255;255m ${ESC}[38;2;128;128;128m·${ESC}[38;2;255;255;255m ${ESC}[38;2;238;238;238mGLM-5.3-Flash${ESC}[38;2;255;255;255m ${ESC}[38;2;128;128;128mGLM via organization gateway${ESC}[38;2;255;255;255m${ESC}[48;2;10;10;10m
+  ${ESC}[38;2;92;156;245m╹${ESC}[38;2;30;30;30m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀${ESC}[38;2;255;255;255m
+  ${ESC}[38;2;128;128;128m/tmp/proj:main${ESC}[38;2;255;255;255m      ${ESC}[38;2;238;238;238mshift+tab ${ESC}[38;2;128;128;128magents${ESC}[38;2;255;255;255m  ${ESC}[38;2;238;238;238mctrl+p ${ESC}[38;2;128;128;128mcommands${ESC}[38;2;255;255;255m"
+  assert_screen "opencode2 typed draft on tmux" pending "$CAPS_TMUX" "$typed" 5 probe-absent
+  assert_screen "opencode2 typed draft on herdr" pending "$CAPS_STYLED" "$typed"
+  assert_screen "opencode2 typed draft on zellij" pending "$CAPS_STYLED_NOID" "$typed"
+  # While busy the composer is empty and the status row carries the busy
+  # cells: progress dots, `esc interrupt`, the usage and cost cell.
+  busy=$'  ┃\n  ┃\n  ┃\n  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n   ■■⬝⬝⬝⬝⬝⬝ esc interrupt                                                           9.1K (1%) · $0.00  ctrl+p commands'
+  assert_screen "opencode2 busy turn keeps an empty composer on herdr" empty "$CAPS_STYLED" "$busy"
+  assert_screen "opencode2 busy turn keeps an empty composer on zellij" empty "$CAPS_STYLED_NOID" "$busy"
+  assert_screen "opencode2 busy turn keeps an empty composer on cmux/orca" empty "$CAPS_PLAIN" "$busy"
+  # NON-VACUOUSNESS: the three captured status rows are recognized furniture,
+  # and the rows that must never qualify do not.
+  _fm_composer_row_is_opencode_status '/tmp/proj:main      shift+tab agents  ctrl+p commands' \
+    || fail "the fresh keybind-chord status row must be recognized as furniture"
+  _fm_composer_row_is_opencode_status "/tmp/proj:main      9.9K (1%) · \$0.00  ctrl+p commands" \
+    || fail "the post-turn usage-cell status row must be recognized as furniture"
+  _fm_composer_row_is_opencode_status " ■■⬝⬝⬝⬝⬝⬝ esc interrupt    9.1K (1%) · \$0.00  ctrl+p commands" \
+    || fail "the busy status row must be recognized as furniture"
+  for activity in 'fix the tests before pushing' '$ ls -la' 'src/main.rs:42 fix the import' 'Working on request...' 'press esc to interrupt the agent'; do
+    _fm_composer_row_is_opencode_status "$activity" \
+      && fail "ordinary row '$activity' must not be mistaken for opencode status furniture"
+  done
+  # The skip is bounded by the furniture proof: anything else directly below
+  # the floor still marks the envelope stale and refuses, and a status row
+  # with no left-bar envelope above it proves nothing.
+  dead=$'  ┃\n  ┃\n  ┃\n  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n$'
+  assert_screen "dead shell below the opencode2 floor" unknown "$CAPS_STYLED" "$dead"
+  assert_screen "dead shell below the opencode2 floor on zellij" unknown "$CAPS_STYLED_NOID" "$dead"
+  assert_screen "dead shell below the opencode2 floor on cmux/orca" unknown "$CAPS_PLAIN" "$dead"
+  activity=$'  ┃\n  ┃\n  ┃\n  ┃  Build auto · GLM-5.3-Flash GLM via organization gateway\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\nWorking on request...'
+  assert_screen "unclaimed activity below the opencode2 floor" unknown "$CAPS_STYLED" "$activity"
+  assert_screen "unclaimed activity below the opencode2 floor on cmux/orca" unknown "$CAPS_PLAIN" "$activity"
+  assert_screen "status row with no left bar above it" unknown "$CAPS_STYLED" \
+    $'transcript\n  /tmp/proj:main      9.9K (1%) · $0.00  ctrl+p commands'
+  pass "matrix: opencode 2.x's status row below the floor is furniture; idle, typed, busy, and stale panes keep their verdicts"
+}
+
 test_matrix_grok_titled_bottom_border() {
   # Grok 1.0.5 widened its titled BOTTOM border three columns past the top and
   # content rows. This is the idle capture from issue #3436; Herdr has no
@@ -1039,6 +1124,7 @@ test_matrix_codex_idle_starfield_furniture
 test_matrix_pi_separated_needs_identity
 test_matrix_pi_dollar_status_footer_is_empty
 test_matrix_opencode_leftbar_signals
+test_matrix_opencode2_status_row_below_floor
 test_matrix_grok_titled_bottom_border
 test_matrix_claude_titled_top_rule
 test_matrix_kimi_bordered_shell_glyph_box

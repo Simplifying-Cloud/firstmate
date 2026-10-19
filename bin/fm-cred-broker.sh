@@ -186,9 +186,14 @@ pending_directory() {
 }
 
 pending_fingerprint() {
-  fm_sandbox_credential_file_ok "pending credential" "$1" || return 1
-  jq -e '.token | type == "string" and startswith("ghs_")' "$1" >/dev/null 2>&1 || return 1
-  jq -ej '.token | select(type == "string" and startswith("ghs_"))' "$1" 2>/dev/null \
+  local task=$1 entry=$2
+  fm_sandbox_credential_file_ok "pending credential" "$entry" || return 1
+  if ! jq -e '.token | type == "string" and startswith("ghs_")' "$entry" >/dev/null 2>&1; then
+    ledger_append "mint-failed github task=$task reason=tokenless outcome=unknown" || return 1
+    rm -f -- "$entry"
+    return $?
+  fi
+  jq -ej '.token | select(type == "string" and startswith("ghs_"))' "$entry" 2>/dev/null \
     | sha256_hex | cut -c1-12
 }
 
@@ -197,14 +202,15 @@ pending_clear() {
   [ ! -L "$PENDING" ] && [ ! -L "$PENDING/$task" ] || return 1
   for entry in "$PENDING/$task"/*; do
     [ -e "$entry" ] || [ -L "$entry" ] || continue
-    found=$(pending_fingerprint "$entry") || return 1
+    found=$(pending_fingerprint "$task" "$entry") || return 1
     [ "$found" != "$fp" ] || rm -f -- "$entry" || return 1
   done
 }
 
 pending_revoke() {
   local task=$1 entry=$2 reason=$3 allow_expiry=${4:-no} fp expires epoch result=failed
-  fm_sandbox_credential_file_ok "pending credential" "$entry" || return 1
+  fp=$(pending_fingerprint "$task" "$entry") || return 1
+  [ -n "$fp" ] || return 0
   work_dir
   jq -ej '.token | select(type == "string" and startswith("ghs_"))' "$entry" > "$WORK/pending-token" 2>/dev/null \
     && token_ok "$WORK/pending-token" || return 1
@@ -226,7 +232,7 @@ pending_revoke_fp() {
   [ ! -L "$PENDING" ] && [ ! -L "$PENDING/$task" ] || return 1
   for entry in "$PENDING/$task"/*; do
     [ -e "$entry" ] || [ -L "$entry" ] || continue
-    found=$(pending_fingerprint "$entry") || return 1
+    found=$(pending_fingerprint "$task" "$entry") || return 1
     if [ "$found" = "$fp" ]; then
       pending_revoke "$task" "$entry" superseded || return 1
     fi
@@ -287,9 +293,8 @@ mint_refused() { # <task> <repo> <access> <purpose> <reason> <diagnostic>
   if [ -n "$MINT_PENDING" ] && [ -f "$MINT_PENDING" ] \
       && ! jq -e '.token | type == "string" and startswith("ghs_")' "$MINT_PENDING" >/dev/null 2>&1; then
     rm -f -- "$MINT_PENDING"
-    case "$5" in unreachable|response) outcome=" outcome=unknown" ;; esac
   fi
-  [ "$5" != unreachable ] || outcome=" outcome=unknown"
+  case "$5" in unreachable|response) outcome=" outcome=unknown" ;; esac
   ledger_append "mint-failed github task=$1 repo=$2 access=$3 purpose=$4 reason=$5$outcome" || true
   return 1
 }

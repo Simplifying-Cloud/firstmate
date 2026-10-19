@@ -770,6 +770,39 @@ SH
   refresh_due
   assert_equals 1 "$(posts)" "an interrupted attempt observes the retry delay"
   assert_equals '' "$OUT" "the next pass does not repeat the wake"
+  assert_equals 1 "$(pending_count t-interrupted)" "interruption removes only the tokenless entry"
+  assert_contains "$(cat "$LEDGER")" "task=t-interrupted reason=tokenless outcome=unknown" "interrupted mint outcome is recorded without a value"
+  run_broker github retire --task t-interrupted
+  expect_code 0 "$RC" "retirement succeeds after an interrupted mint"
+  assert_equals 0 "$(pending_count t-interrupted)" "retirement clears the remaining credential"
+}
+
+test_pending_readers_discard_tokenless_entries() {
+  local reader placeholder fp
+  for reader in retire record-revoke refresh; do
+    new_case "tokenless-$reader"
+    sandbox_task t-placeholder
+    launch_mint t-placeholder write 600
+    fp=$(fp_of "$CASE/out/t-placeholder.launch")
+    for placeholder in empty truncated nonjson; do
+      (umask 077; printf '%s' '' > "$HOME_DIR/state/cred-pending/t-placeholder/$placeholder")
+    done
+    printf '{"token":"ghs_unfinished"' > "$HOME_DIR/state/cred-pending/t-placeholder/truncated"
+    printf 'bad gateway' > "$HOME_DIR/state/cred-pending/t-placeholder/nonjson"
+    case "$reader" in
+      retire) run_broker github retire --task t-placeholder ;;
+      record-revoke) run_broker github record-revoke --task t-placeholder --fp "$fp" --result revoked ;;
+      refresh) refresh_due ;;
+    esac
+    expect_code 0 "$RC" "pending reader handles tokenless entries"
+    assert_equals 3 "$(grep -c 'reason=tokenless outcome=unknown' "$LEDGER")" "each discarded placeholder has an unknown-outcome record"
+    if [ "$reader" = refresh ]; then
+      assert_equals 1 "$(pending_count t-placeholder)" "refresh retains the replacement credential"
+    else
+      assert_equals 0 "$(pending_count t-placeholder)" "pending reader removes tokenless entries"
+    fi
+    assert_no_token_anywhere "tokenless pending entries"
+  done
 }
 
 test_pending_set_gates_retirement() {
@@ -873,6 +906,7 @@ test_unknown_delivery_revokes_the_token
 test_failed_revoke_still_refreshes
 test_refresh_budget_and_expiry_order
 test_interrupted_refresh_is_reported_once
+test_pending_readers_discard_tokenless_entries
 test_pending_set_gates_retirement
 test_interrupted_predecessor_cleanup_keeps_confirmed_delivery
 echo "ALL TESTS PASSED"

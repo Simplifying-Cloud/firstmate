@@ -7,7 +7,10 @@
 #   2. The launch is standalone with an isolated config dir, disables
 #      self-update, carries the platform-only provider policies and the model
 #      inside OPENCODE_CONFIG_CONTENT, and passes no --model flag the 2.x TUI
-#      does not have.
+#      does not have. The worker process receives the per-task config dir as
+#      OPENCODE_CONFIG_DIR, and that dir holds only the service setting that
+#      keeps every OpenCode command off the operator's shared background
+#      server.
 #   3. Platform discovery keeps only providers whose baseURL routes through
 #      the platform origin; a personal provider in the same org document is
 #      denied, and a model outside the discovered set refuses the spawn.
@@ -56,6 +59,10 @@ debug)
   cat "${FM_FAKE_OC2_DEBUG_CONFIG:?fixture path missing}"
   ;;
 *)
+  # The worker launch itself: record the config dir the worker process got.
+  if [ -n "${FM_FAKE_OC2_ENV_LOG:-}" ]; then
+    printf 'OPENCODE_CONFIG_DIR=%s\n' "${OPENCODE_CONFIG_DIR-<unset>}" >"$FM_FAKE_OC2_ENV_LOG"
+  fi
   exit 0
   ;;
 esac
@@ -210,6 +217,37 @@ test_oc2_spawn_launches_platform_only_and_standalone() {
   pass "opencode2 launch is standalone, config-isolated, and platform-only"
 }
 
+test_oc2_worker_environment_isolates_the_operator_setup() {
+  local rec id=oc2-env-1 out launch cfgdir want
+  rec=$(make_oc2_spawn_case env "$id")
+  read_oc2_spawn_record "$rec"
+  out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
+  expect_code 0 "$?" "opencode2 spawn should succeed: $out"
+  launch=$(grep -F OPENCODE_CONFIG_CONTENT "$CASE_DIR/launch.log" | tail -1)
+  [ -n "$launch" ] || fail "no launch line recorded for the opencode2 spawn"
+  # Run the staged launch exactly as the worker pane would; the fake 2.x
+  # binary records the environment the worker process actually receives.
+  (cd "$WT_DIR" && FM_FAKE_OC2_ENV_LOG="$CASE_DIR/worker-env" PATH="$FAKEBIN_DIR:$BASE_PATH" \
+    bash -c "$launch") >"$CASE_DIR/launch-run.log" 2>&1 \
+    || fail "the staged opencode2 launch did not run: $(cat "$CASE_DIR/launch-run.log")"
+  cfgdir=$(sed -n 's/^OPENCODE_CONFIG_DIR=//p' "$CASE_DIR/worker-env" 2>/dev/null)
+  want="$(cd -P "$HOME_DIR/state" && pwd)/$id.opencode-config"
+  [ "$cfgdir" = "$want" ] \
+    || fail "the worker must get its per-task config dir '$want' as OPENCODE_CONFIG_DIR, got '$cfgdir'"
+  # OpenCode 2.x reads its service setting from the active config dir; disabled
+  # makes every OpenCode command in the worker's environment start a private
+  # server instead of attaching to the operator's background server.
+  node -e '
+const fs = require("fs");
+const setting = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+process.exit(setting.disabled === true ? 0 : 1);
+' "$cfgdir/service.json" \
+    || fail "the per-task config dir must turn the shared background server off: $(cat "$cfgdir/service.json" 2>&1)"
+  [ "$(ls -A "$cfgdir")" = service.json ] \
+    || fail "the per-task config dir must hold only the service setting, got: $(ls -A "$cfgdir")"
+  pass "opencode2 worker gets a per-task OPENCODE_CONFIG_DIR that keeps OpenCode off the operator's shared background server"
+}
+
 test_oc2_model_outside_the_platform_refuses() {
   local rec id=oc2-model-bad out
   rec=$(make_oc2_spawn_case model-bad "$id")
@@ -330,6 +368,8 @@ test_oc2_control_mechanics_are_the_verified_ones() {
 test_oc2_binary_resolution_refuses_without_2x \
   &&
   test_oc2_spawn_launches_platform_only_and_standalone \
+  &&
+  test_oc2_worker_environment_isolates_the_operator_setup \
   &&
   test_oc2_model_outside_the_platform_refuses \
   &&

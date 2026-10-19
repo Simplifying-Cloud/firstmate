@@ -8,7 +8,7 @@ The operating facts live in [`.agents/skills/harness-adapters/references/harness
 | Field | Value |
 |---|---|
 | Version | `opencode v2.0.32` (`@opencode/cli`), PATH-shadowed by `opencode 1.18.31` (`~/.opencode/bin/opencode`) |
-| Verified | 2026-10-17 |
+| Verified | 2026-10-17; config isolation 2026-10-19 |
 | Platform | Linux x86_64, Herdr 0.9.1 lab session for TUI driving, tmux for the live guard |
 | Binary | `~/.local/bin/opencode` and `~/.local/bin/opencode2` (both symlinked to the same 2.x executable) |
 | Platform origin | `https://ai.simplifying.cloud` (org config from its `/.well-known/opencode` manifest) |
@@ -31,6 +31,36 @@ Observed on 2.0.32:
 - Without `--standalone` the same environment listed every provider on the machine, including the operator's personal `minimax-coding-plan`, `zai-coding-plan`, `openai`, and `ollama`: the shared background server (127.0.0.1:49374, `serve --service`) was started with the operator's environment and ignores this launch's `OPENCODE_CONFIG_CONTENT` entirely, which is why the adapter launch is `--standalone`.
 - The server log confirmed the isolated config dir was watched (`watcher subscribe path=/tmp/…/wcfg`), the org document still loaded from the credential store's cached well-known KV outside it, and `OPENCODE_DISABLE_AUTOUPDATE=1` produced `update check skipped reason=disabled`.
 
+## Shared-server reach and the service setting
+
+Verified on 2026-10-19 against `opencode v2.0.32` from scratch git projects, reading only source paths, MCP server names, and provider ids.
+On 2.0.32, `debug config`, `debug agents`, `mcp list`, `mcp auth`, `mcp logout`, `plugin list`, and `plugin inspect` resolve their server with no `--standalone` or `--server` option, while `run`, `models`, `api`, and the TUI default to the per-user background server unless given `--standalone`.
+That server was started with the operator's environment, so it answered this command, run with `OPENCODE_CONFIG_DIR` at an empty directory, from the operator's own config:
+
+```sh
+OPENCODE_CONFIG_DIR=<empty dir> OPENCODE_DISABLE_AUTOUPDATE=1 \
+  OPENCODE_CONFIG_CONTENT='{"permission":{"*":"allow"}}' ~/.local/bin/opencode debug config
+```
+
+It listed the org document, `~/.config/opencode/opencode.json`, and the `~/.config/opencode` directory, with no document for the launch's own `OPENCODE_CONFIG_CONTENT`.
+A bare `opencode models` under a launch allowlist of `zai` and `minimax` listed eight providers, because the shared server ignored the launch's policies.
+
+2.x reads its service setting from `service.json` in the active config dir: `opencode service get disabled` printed `true` with `OPENCODE_CONFIG_DIR` at a directory holding `{"disabled":true}` and `false` with it at an empty one, and a disabled service makes every such command start a private server that inherits the caller's environment.
+With that file in the config dir, the same `debug config` listed only the org document, the config dir itself, and the launch-content document; the bare `models` listed exactly `zai` and `minimax`; and the bare `run` spawned its own `serve --stdio --port 0` child.
+No new listener appeared on 127.0.0.1:49374, which stayed the operator's own `serve --service` process.
+`opencode service set disabled true` would write the same file but first stops the running background server, so the adapter writes it directly.
+
+## MCP servers and other sources
+
+A private server started the way `--standalone` starts one (`serve --stdio --port 0` with the caller's environment) registered config-defined MCP servers about two seconds after it reported its URL.
+An immediate `opencode mcp list` therefore printed `No MCP servers configured` even with an MCP server in the launch content, so MCP evidence comes from polling a server that stays up.
+With a stand-in operator global config under `XDG_CONFIG_HOME` defining `fm-operator-sentinel` and the launch content defining `fm-launch-sentinel`, both registered without the per-task config dir and only `fm-launch-sentinel` registered with it.
+In the real operator environment from a firstmate worktree, the per-task config dir again left only the launch's server registered.
+The operator's global config currently defines no MCP servers, and the credential store holds no OpenCode Console connection, so no personal MCP server was present to leak when this was verified.
+
+In the isolated environment from a firstmate worktree, the skill list held 20 skills from `~/.claude` and 1 from `~/.agents` alongside the worktree's own, and adding `OPENCODE_DISABLE_CLAUDE_CODE=1` removed the `~/.claude` ones while keeping the rest.
+An `opencode.json` in a directory above a scratch git project, and a `.opencode` directory there, each loaded as a config source in the isolated environment, so project discovery walks past the repository root.
+
 ## Platform-only traffic
 
 The launch-content policies deny `provider.use` for `*` and allow exactly the providers whose org-config `baseURL` routes through the platform origin (discovered via `debug config`, which redacts secrets).
@@ -44,6 +74,13 @@ The launch-content policies deny `provider.use` for `*` and allow exactly the pr
 ```
 
 An earlier same-day investigation that looked like an expired Access session was actually the shared background server wedged by a location whose plugin `setup` never returned (below); the standalone posture reached the platform fine with the same stored credential.
+
+The worker posture with the per-task service setting still reached the platform on 2026-10-19.
+A bare `opencode run "Reply with exactly OK." </dev/null`, with no `--standalone`, under `OPENCODE_CONFIG_DIR` at a directory from `fm_opencode2_isolate_config_dir` and launch content carrying the discovered policies and `zai/glm-5.3-flash`, printed `OK` at 2026-10-19T05:05:44Z.
+A non-interactive `opencode run` reads piped stdin until end of file, so without the `</dev/null` it never sent the prompt.
+The real fm-spawn launch line, staged with the real binary and real discovery into a throwaway home and run in a throwaway tmux server, settled its first turn at 2026-10-19T05:09:04Z with `OK` under the footer `Build auto · GLM-5.3-Flash GLM via organization gateway`.
+During that turn, `debug config` from the worker environment listed only the org document, the per-task config dir, the worktree's `.opencode` directory, and the launch-content document, a polled private server in that environment registered no MCP server, and the shared OpenCode log held no MCP line for that worktree.
+`/exit` left the pane with exit status 0, and 127.0.0.1:49374 still belonged only to the operator's own server.
 
 ## Plugin form and busy state
 
@@ -70,22 +107,27 @@ Driven through the Herdr lab pane against the delayed mock:
 ```sh
 bin/fm-test-run.sh tests/fm-opencode2-harness.test.sh
 FM_OPENCODE2_SIGNALS_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-signals-live-e2e.test.sh
+FM_OPENCODE2_ISOLATION_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-isolation-live-e2e.test.sh
 ```
 
-Observed output:
+Observed output on 2026-10-19:
 
 ```text
 ok - opencode2 launch is standalone, config-isolated, and platform-only
+ok - opencode2 worker gets a per-task OPENCODE_CONFIG_DIR that keeps OpenCode off the operator's shared background server
 ok - opencode2 refuses a model outside the discovered platform providers
 ok - opencode2 plugin classifies from session.execution events, scoped to the latched worker session
 ok - opencode2 opencode v2.0.32 live: standalone TUI turn drove the generated plugin busy->idle with the notification touch, and /exit left the pane
+ok - opencode2 opencode v2.0.32 live: the per-task config dir disables the shared server, so debug config answers privately without the operator global config, and only the launch MCP server registers
 ```
 
-The portable suite pins binary selection, the platform-only launch line, the isolated config dir, model refusals, the secondmate refusal, the generated plugin's latch scoping, and the control tables against fake binaries; the live guard is token-free (localhost mock) and runs by default wherever `opencode2`, `tmux`, `python3`, `node`, and `curl` are installed, capability-skipping elsewhere.
+The portable suite pins binary selection, the platform-only launch line, the worker environment's isolated config dir and its service setting (by running the staged launch line against a fake 2.x binary), model refusals, the secondmate refusal, the generated plugin's latch scoping, and the control tables against fake binaries.
+Both live guards are token-free and run by default wherever their tools are installed, capability-skipping elsewhere: the signals guard needs `opencode2`, `tmux`, `python3`, `node`, and `curl` and drives the TUI against a localhost mock, and the isolation guard needs `opencode2` and `python3` and runs the real binary against a stand-in operator under the XDG directories, with each isolated verdict paired with a control run that must see the stand-in operator's config.
 
 ## Not verified
 
 - No 2.x primary supervision integration (turn-end guard, watch-arm, session-start nudge in the 2.x plugin form), which is why a secondmate on `opencode2` is refused.
 - No sandbox placement: a sandbox host has none of the operator's OpenCode 2.x platform sign-in, so the org providers cannot resolve there.
 - No effort mapping: no platform model exposes a variant list on 2.0.32, so the record-and-omit posture is untestable beyond its omission.
+- No OpenCode Console sign-in: the 2.0.32 source loads a signed-in Console account's MCP servers and policies from the credential store, outside any config dir, and registers those MCP servers ahead of config-defined ones, but no Console connection exists here to exercise it.
 - The gateway-log identity metadata (`user_id` UUID stamping) was read but not modified or stress-tested; that surface belongs to the platform project.

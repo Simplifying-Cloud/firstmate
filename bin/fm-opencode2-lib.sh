@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # fm-opencode2-lib.sh - OpenCode 2.x worker-adapter helpers: 2.x binary
-# selection, platform provider discovery, and the launch-config JSON fragments
-# that make every worker model request go through the governed platform.
+# selection, platform provider discovery, the per-task isolated config
+# directory, and the launch-config JSON fragments that make every worker model
+# request go through the governed platform.
 # Usage: . bin/fm-opencode2-lib.sh
 # The opencode2 adapter is verified for crewmate and scout launches only
 # (.agents/skills/harness-adapters/references/harness/opencode.md owns the
 # operating facts; AGENTS.md section 4 owns the verified list). Every helper
-# here fails closed: a binary that cannot be proven to be 2.x, or a platform
-# whose providers cannot be discovered, refuses the spawn rather than
-# launching a worker that could use any other provider.
+# here fails closed: a binary that cannot be proven to be 2.x, a platform
+# whose providers cannot be discovered, or an isolated config directory that
+# cannot be written refuses the spawn rather than launching a worker that
+# could use any other provider or the operator's own OpenCode setup.
 # Selection never depends on PATH order: OpenCode 1.x and 2.x are separate
 # packages that both install an `opencode` command, so which one a bare
 # `opencode` resolves to is a property of the caller's PATH, not of the
@@ -144,4 +146,27 @@ fm_opencode2_model_json() {
   done
   echo "error: opencode2 model '$model' does not name one of the platform providers ($*); every worker model request must go through the platform" >&2
   return 1
+}
+
+# fm_opencode2_isolate_config_dir <dir>: create the launch's per-task
+# OPENCODE_CONFIG_DIR, holding only OpenCode's own service setting with the
+# shared background server turned off. The directory replaces the operator's
+# global config dir for every OpenCode process in the worker's environment,
+# and 2.x reads service.json from it, so the commands that would otherwise
+# attach to the operator's background server - which answers from the
+# operator's own config and ignores the launch's policies - start a private
+# server inheriting the launch environment instead (the adapter reference's
+# "Server isolation" and "Config isolation" rows own those facts). The file is
+# written directly because `opencode service set disabled true` first stops
+# the running background server, which belongs to the operator.
+fm_opencode2_isolate_config_dir() {  # <dir>
+  local dir=$1
+  mkdir -p "$dir" || {
+    echo "error: could not create the isolated opencode config directory $dir" >&2
+    return 1
+  }
+  printf '%s\n' '{"disabled":true}' >"$dir/service.json" || {
+    echo "error: could not turn the shared OpenCode background server off in $dir" >&2
+    return 1
+  }
 }

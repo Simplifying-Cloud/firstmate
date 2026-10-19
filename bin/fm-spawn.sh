@@ -2965,16 +2965,18 @@ launch_template() {
   # and the busy-state plugin's project config would all silently not apply;
   # --standalone gives the worker a private server that reads exactly this
   # launch's environment (verified live, opencode 2.0.32). OPENCODE_CONFIG_DIR
-  # points at a firstmate-owned per-task directory so the operator's own global
-  # config, plugins, and MCP servers do not load, while the org config and the
-  # credential store live outside it and still reach the worker. The 2.x TUI
-  # has no --model flag, so the resolved model rides the config JSON, and the
-  # policies deny every provider except the discovered platform ones
-  # (bin/fm-opencode2-lib.sh owns discovery and the fragments). --auto is the
-  # 2.x-native auto-approve; the migrated permission allow-all keeps the same
-  # posture for any non-interactive path. OPENCODE_DISABLE_AUTOUPDATE keeps a
-  # background self-upgrade from exiting the worker mid-task, which 1.x was
-  # known to do.
+  # points at a firstmate-owned per-task directory that replaces the operator's
+  # global config dir and keeps every OpenCode command in the worker's
+  # environment off the operator's shared background server
+  # (fm_opencode2_isolate_config_dir owns why), while the org config and the
+  # credential store live in the data directory and still reach the worker.
+  # The 2.x TUI has no --model flag, so the resolved model rides the config
+  # JSON, and the policies deny every provider except the discovered platform
+  # ones (bin/fm-opencode2-lib.sh owns discovery and the fragments). --auto is
+  # the 2.x-native auto-approve; the migrated permission allow-all keeps the
+  # same posture for any non-interactive path. OPENCODE_DISABLE_AUTOUPDATE
+  # keeps a background self-upgrade from exiting the worker mid-task, which 1.x
+  # was known to do.
   opencode2) printf '%s' 'OPENCODE_CONFIG_DIR=__OC2CFGDIR__ OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__OC2POLICIES____OC2MODEL__}'\'' __OC2BIN__ --standalone --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIRESUME__ --approve'
@@ -6005,12 +6007,9 @@ devin)
 agy) LAUNCH=${LAUNCH//__AGYBIN__/"$(shell_quote "$AGY_BIN")"} ;;
 opencode2)
   # The per-task isolated config directory is created here, after every
-  # validation refused, so a failed spawn leaves no empty directory behind.
+  # validation refused, so a failed spawn leaves no directory behind.
   OC2_CFG_DIR="$STATE_REAL/$ID.opencode-config"
-  mkdir -p "$OC2_CFG_DIR" || {
-    echo "error: could not create the isolated opencode config directory $OC2_CFG_DIR" >&2
-    exit 1
-  }
+  fm_opencode2_isolate_config_dir "$OC2_CFG_DIR" || exit 1
   LAUNCH=${LAUNCH//__OC2BIN__/"$(shell_quote "$OC2_BIN")"}
   LAUNCH=${LAUNCH//__OC2CFGDIR__/"$(shell_quote "$OC2_CFG_DIR")"}
   LAUNCH=${LAUNCH//__OC2POLICIES__/$OC2_POLICIES}

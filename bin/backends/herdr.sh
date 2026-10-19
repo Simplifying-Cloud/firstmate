@@ -3389,14 +3389,22 @@ fm_backend_herdr_proof_lines() {  # <text>
 # 2.1.283 draws a typed slash command in muted grey 38;2;112;112;112 (verified
 # live), which that strip dropped, judging a typed /exit unsent. Claude's own
 # ghost suggestion is SGR-2 dim and is still stripped.
-fm_backend_herdr_composer_content() {  # <target>
-  local target=$1 cap caps
+# With <rule-closed>, the post-send read-back first cuts the viewport at the
+# closing rule of Claude's composer (fm_composer_rule_closed_screen): Claude
+# 2.1.303 leads its slash-command menu's selected row with the composer's own
+# `❯`, so the full viewport read the menu as the typed /exit and judged it
+# unsent. The pre-send emptiness read keeps the full viewport.
+fm_backend_herdr_composer_content() {  # <target> [rule-closed]
+  local target=$1 mode=${2:-} cap caps closed
   if cap=$(fm_backend_herdr_visible_capture_ansi "$target" 2>/dev/null) && [ -n "$cap" ]; then
     caps=$(printf 'styled=1\ncursor=0\nidentity=0')
   elif cap=$(fm_backend_herdr_visible_capture "$target") && [ -n "$cap" ]; then
     caps=$(printf 'styled=0\ncursor=0\nidentity=0')
   else
     return 1
+  fi
+  if [ "$mode" = rule-closed ] && closed=$(fm_composer_rule_closed_screen "$cap"); then
+    cap=$closed
   fi
   FM_COMPOSER_GHOST_LUMA_MAX=0 fm_composer_extract_selected_content "$caps" "$cap"
 }
@@ -3467,7 +3475,7 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
   fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
   sleep "$settle"
   if [ "$proof" = 1 ]; then
-    if ! content=$(fm_backend_herdr_composer_content "$target") \
+    if ! content=$(fm_backend_herdr_composer_content "$target" rule-closed) \
       || ! fm_backend_herdr_composer_payload_shown "$text" "$content"; then
       if fm_backend_herdr_composer_clear "$target" "$text"; then
         printf 'send-failed'

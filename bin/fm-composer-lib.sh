@@ -1638,6 +1638,46 @@ _fm_composer_select_cursorless() {
   [ -n "$FM_COMPOSER_SELECTED_KIND" ]
 }
 
+# fm_composer_rule_closed_screen: print <screen> through the closing rule of
+# its bottom-most RULE-CLOSED bare composer - an agent-glyph row whose wrap
+# region (the same blank, edge, and furniture bounds the bare selection uses)
+# ends directly on a solid separator row. 1 when no such composer exists.
+# Claude 2.x draws its composer exactly so, and everything it renders below
+# that rule is not input. Claude Code 2.1.303 (verified live on Herdr 0.9.1)
+# draws its slash-command completion menu there with the selected row led by
+# the composer's own `❯` (`  ❯ /exit   Exit the CLI`), which the cursorless
+# bottom-most rule selects as the composer, so a typed /exit read back as the
+# whole menu. A menu row never closes on a rule, so it is never selected here.
+# This is a read-back aid for a caller that already knows the pane runs Claude
+# and must see what it just typed into a composer proven empty first; it is
+# not a classifier and authorizes nothing on its own.
+fm_composer_rule_closed_screen() {  # <screen>
+  local screen=$1 plain line trimmed glyph row=0 open=-1 close=-1
+  plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  while IFS= read -r line; do
+    trimmed=$line
+    fm_composer_normalize_trim_var trimmed
+    if [ "$open" -ge 0 ]; then
+      if _fm_composer_pi_separator_row "$trimmed"; then
+        close=$row
+        open=-1
+      elif [ -z "$trimmed" ] || fm_composer_row_has_edge "$trimmed" \
+         || _fm_composer_row_is_omp_status "$trimmed" \
+         || _fm_composer_row_is_braille_furniture "$trimmed"; then
+        open=-1
+      fi
+    fi
+    if [ "$open" -lt 0 ] && fm_composer_leading_agent_glyph_var glyph "$trimmed"; then
+      open=$row
+    fi
+    row=$((row + 1))
+  done <<EOF
+$plain
+EOF
+  [ "$close" -ge 0 ] || return 1
+  printf '%s\n' "$screen" | sed -n "1,$((close + 1))p"
+}
+
 fm_composer_extract_selected_content() {  # <caps> <screen>
   local caps=$1 screen=$2 styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
   local leading_blank=1 placeholder_position=0 prompt_is_shell=0

@@ -156,7 +156,8 @@
 # home's bin/fm-cred-broker.sh refresh-due pushes a new GitHub App installation
 # token before the old one expires. stdin carries exactly one gh_token_b64= line,
 # at most 64 KiB, validated as provision validates that field. It is refused
-# for a retired task, stores the token as provision does, and restores the
+# once teardown has passed or the task is retired, leaving the stored token
+# unchanged. Otherwise it stores the token as provision does and restores the
 # previous gh configuration if storing fails. state/task-provision.journal
 # records the refresh without the value. Prints refresh=stored, task_id, and
 # gh_token_fp for the primary to compare with the token it sent. The supervisor
@@ -175,8 +176,10 @@
 # carry only this task's mint records: a mint matching this task and
 # stored fingerprint supplies expiry evidence. A failed revoke stays retryable
 # until confirmed or expired. state/<id>.teardown-passed preserves the passing
-# teardown across retries; only closure writes state/<id>.retired, so SSH exit 255
-# (unknown completion) prints already-retired and the recorded revoke result.
+# teardown across retries; only closure writes state/<id>.retired. A retry after
+# SSH exit 255 (unknown completion) prints already-retired and the recorded
+# revoke result only if retirement completed. A task provisioned without a
+# GitHub token skips revocation and does not require gh to retire.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

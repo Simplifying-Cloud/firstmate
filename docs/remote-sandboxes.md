@@ -75,7 +75,7 @@ A GitHub credential whose source is `app` is a GitHub App installation token ins
 [`bin/fm-cred-broker.sh`](../bin/fm-cred-broker.sh) mints it at spawn, before the sandbox exists, for exactly the task's repository: read-only for a scout and read-write for a ship, expiring within an hour.
 The App's private key never leaves this home; [the configuration reference](configuration.md#github-app-configgithub-app) owns `config/github-app` and the App's permissions.
 
-- While the task runs, the watcher refreshes the token about 15 minutes before it expires, pushing a fresh one to the host's `cred-refresh` verb, which stores it the way provisioning did.
+- While the task runs and retirement has not started, the watcher refreshes the token about 15 minutes before it expires, pushing a fresh one to the host's `cred-refresh` verb, which stores it the way provisioning did.
 The supervisor retains received tokens for cleanup under the [broker's pending-revoke contract](../bin/fm-cred-broker.sh).
 - A failed refresh is retried every few minutes and queues one `check: sandbox <id> credential refresh failed` wake per token, before that token expires; the [broker's header](../bin/fm-cred-broker.sh) owns the fixed cadence and bounds.
 - A ship's retirement remains retryable until its received App tokens are confirmed dead under the [broker's retirement contract](../bin/fm-cred-broker.sh).
@@ -197,7 +197,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 - `launch`, `control`, `crew-state`, and `retire` run the host's own spawn, control plane, current-state read, and teardown, so the landed-work test that guards a local cleanup guards a sandbox's too.
   Host-side retirement supports ships only; scouts are refused because their completion gate belongs to the supervising home.
 - `state`, `observe`, `capture`, `send`, `ring`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox keyed by the primary's request id, ring that inbox's doorbell again for the watcher's re-ring ladder, and replace its brief.
-- `cred-refresh` replaces the stored GitHub token with the fresh [minted token](#credentials) the primary pushes, refusing a retired task.
+- `cred-refresh` replaces the stored GitHub token with the fresh [minted token](#credentials) the primary pushes; [the control script's header](../bin/fm-remote-task-control.sh) owns its validation and teardown refusal rules.
 - `control` applies the [control plane's absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone) on the host before reclaiming a missing endpoint.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 

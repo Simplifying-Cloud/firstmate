@@ -44,7 +44,10 @@
 # it through bin/fm-on.sh to the host's cred-refresh verb
 # (bin/fm-remote-task-control.sh), which stores it and confirms its fingerprint.
 # A task whose spawn or control lock is held is skipped for that pass, and the
-# control lock is held across the refresh. A success is silent. A host that
+# control lock is held across the refresh. Under that lock, the sandbox route
+# and ledger eligibility are reloaded before minting; a removed route or an
+# ineligible token is skipped silently without minting or a failure wake.
+# A success is silent. A host that
 # refuses or whose reply never arrives (SSH exit 255, the 60-second delivery
 # bound, or an unconfirmed fingerprint) triggers revocation of the new token.
 # A confirmed delivery triggers revocation of the predecessor. Unconfirmed
@@ -74,8 +77,12 @@
 #   <epoch> refresh github task=<id> fp=<fp> expires=<iso> result=delivered
 #   <epoch> refresh github task=<id> result=failed|unknown reason=<slug> alerted=yes|no [fp=<fp>]
 #   <epoch> revoke github task=<id> fp=<fp> result=revoked|invalid|expired|failed [reason=<slug>] [via=host]
+#   <epoch> retire github task=<id> result=attempted
 # A task's current token is its latest launch mint, or the latest delivered
-# refresh after it; once that token is revoked the task is never refreshed.
+# refresh after it. A revoke event confirming revocation or expiry stops refresh;
+# a retirement attempt or any host revoke report stops refresh for that launch,
+# even when revocation failed. A new launch mint resets that eligibility for a
+# reused task id; a delivered refresh does not reset retirement state.
 #
 # No JWT or token ever enters argv, the environment, a log, the ledger, or a
 # diagnostic: curl starts with --disable so no curlrc applies, and reads its

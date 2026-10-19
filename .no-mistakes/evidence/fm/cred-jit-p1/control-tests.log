@@ -1,0 +1,18 @@
+ok - provision builds a private home, writes the 0600 credentials, and marks the home last
+ok - provision is idempotent per manifest and refuses another task, another manifest, or unknown content
+ok - a failed provision removes what it created and restores the Pi credential file
+ok - provision refuses every unsafe or unaccepted manifest before writing anything it keeps
+ok - provision refuses credentials outside the API-key and GitHub boundary before writing
+ok - a GitHub token requires gh before provisioning writes the home
+ok - Git authenticates the clone and worktree using gh credential storage
+ok - launch runs the host's spawn on tmux, reports the route, without a credential environment
+ok - launch uses an existing tmux server without credential checks
+ok - state, observe, ring, capture, head, and crew-state read the host-local endpoint
+ok - send writes one idempotent record per request into the task's own inbox
+ok - brief-update replaces the brief only with one naming this home's status file
+ok - control relays interrupt and exit and relaunches through the host's control plane
+ok - retire relays the host teardown's landed-work verdict, records a pass, and refuses scouts
+ok - cred-refresh stores a fresh token idempotently and refuses another task, an unprovisioned or retired home, and malformed input
+ok - retire revokes a stored App installation token once, reports it, and keeps the result for a retry
+ok - the dispatcher refuses unknown verbs, unsafe ids, and unprovisioned homes
+ALL TESTS PASSED

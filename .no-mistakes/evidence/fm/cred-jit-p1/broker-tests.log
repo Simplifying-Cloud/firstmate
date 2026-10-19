@@ -1,0 +1,16 @@
+ok - mint writes a private token from a verifiable JWT and records it without its value
+ok - a write token asks for the ship set, with workflows only when configured
+ok - mint refuses unsafe or missing keys, malformed configuration, and malformed arguments before any request
+ok - mint refuses a 401, a 422, an unreachable API, and a token for another repository, which it revokes
+ok - incomplete mints discard tokenless responses and retain received credentials
+ok - revoke deletes a token, reads a dead one as invalid, fails an unconfirmed one, and refuses unsafe files
+ok - record-revoke records only an exact host report, and unknown verbs are usage errors
+ok - refresh-due mints a token of the same scope and delivers it to the host's cred-refresh
+ok - refresh-due leaves fresh, locked, spawning, retired, and unminted tasks alone
+ok - refresh rechecks route and ledger eligibility under the control lock
+ok - a new launch mint restores refresh eligibility for a retired task id
+ok - a failed refresh revokes its token, wakes once per current token, retries after a wait, and recovers
+ok - an unconfirmed delivery revokes its token, wakes once, and an unresolvable record is skipped
+ok - unknown, refused, and superseded mints remain pending until revoked or individually expired
+ok - interruption during predecessor cleanup preserves a confirmed replacement
+ALL TESTS PASSED

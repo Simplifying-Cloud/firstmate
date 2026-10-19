@@ -1,0 +1,10 @@
+ok - an unlanded sandbox ship is refused with the host's reason, keeping the sandbox, records, and mirror
+ok - a landed sandbox ship is retired on its host, then its sandbox destroyed once with label confirmation after its records
+ok - a landed ship's host revokes its stored App token and teardown records it in the credential ledger
+ok - a landed ship's host revokes its stored App token and teardown records it in the credential ledger
+ok - SSH exit 255 preserves the sandbox, records, and backlog, and a rerun finishes after the host retired
+ok - --force destroys a sandbox without the landed proof, but never a record no launch finished publishing
+ok - --force preserves unknown or foreign sandboxes and clears records only after confirmed absence
+ok - a failed destroy keeps a pending record that session start retries until the sandbox is gone
+ok - a sandbox survives a backlog close that fails in teardown and in its replay, and goes once the close lands
+ok - a sandbox scout needs its report locally, fetched when missing, and its completion gate before its sandbox goes

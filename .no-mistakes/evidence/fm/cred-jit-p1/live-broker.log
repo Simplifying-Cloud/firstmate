@@ -1,0 +1,20 @@
+read: minted via real GitHub App; repository list=['Simplifying-Cloud/firstmate']; own README=200; other repository README=404; output and pending response mode=0600
+read: revoke confirmed; old token=401; pending set empty
+read: retirement replay succeeds
+write: minted via real GitHub App; repository list=['Simplifying-Cloud/firstmate']; own README=200; other repository README=404; output and pending response mode=0600
+write: retire confirmed; old token=401; pending set empty
+write: retirement replay succeeds
+duplicate config key: mint refused; no output credential
+tokenless pending entry: retirement succeeds and removes placeholder
+ledger: no credential values; mint, revoke, retire, and unknown-outcome records present
+1792375025 mint github task=live-read repo=Simplifying-Cloud/firstmate access=read expires=2026-10-19T02:57:05Z fp=bc54a16dc8a4 purpose=launch
+1792375027 revoke github task=live-read fp=bc54a16dc8a4 result=revoked
+1792375027 retire github task=live-read result=attempted
+1792375027 mint github task=live-write repo=Simplifying-Cloud/firstmate access=write expires=2026-10-19T02:57:07Z fp=5cd83accf637 purpose=launch
+1792375029 retire github task=live-write result=attempted
+1792375029 revoke github task=live-write fp=5cd83accf637 result=revoked reason=retire
+1792375029 retire github task=live-write result=attempted
+1792375029 mint-failed github task=bad-config repo=Simplifying-Cloud/firstmate access=read purpose=launch reason=config
+1792375029 retire github task=tokenless result=attempted
+1792375029 mint-failed github task=tokenless reason=tokenless outcome=unknown
+

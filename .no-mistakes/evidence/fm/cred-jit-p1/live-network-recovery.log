@@ -1,0 +1,15 @@
+Mint with unreachable proxy exit=1
+error: GitHub could not be reached to mint a token for Simplifying-Cloud/firstmate
+pending entries after failed mint=0
+retire after failed mint exit=0
+mint with working network exit=0
+retire with unreachable proxy exit=1
+error: task network-gate still has unresolved GitHub credentials; retirement remains retryable
+retained pending entries=1
+retire after network restored exit=0
+remaining entries=0
+cleanup retire exit=0
+1792372995 mint-failed github task=network-gate repo=Simplifying-Cloud/firstmate access=read purpose=launch reason=unreachable outcome=unknown
+1792372996 mint github task=network-gate repo=Simplifying-Cloud/firstmate access=read expires=2026-10-19T02:23:16Z fp=1e80947e1a0f purpose=launch
+1792372996 revoke github task=network-gate fp=1e80947e1a0f result=failed reason=retire
+1792372997 revoke github task=network-gate fp=1e80947e1a0f result=revoked reason=retire

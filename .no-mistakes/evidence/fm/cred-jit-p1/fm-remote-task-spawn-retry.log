@@ -1,0 +1,9 @@
+ok - sandbox bootstrap refuses ahead and dirty code roots without discarding changes
+ok - fm-spawn --placement sandbox refuses each named case before any sandbox, record, or backlog change
+ok - fm-spawn --placement sandbox creates, converges, gates, provisions, launches, and records a ship
+ok - fm-spawn --placement sandbox sends only the selected credentials and honors a brief-authorized profile
+ok - fm-spawn --placement sandbox destroys a sandbox that fails before launch and leaves the backlog queued
+ok - fm-spawn --placement sandbox holds the sandbox and its route once launch may have started, preserving SSH 255
+ok - an app credential mints a token for exactly the task's repository, write for a ship and read for a scout, and records it
+ok - an app credential's mint failure, origin, configuration, and destination are refused before any sandbox exists
+ok - a token minted for a spawn that never launches is revoked, and one a worker may hold is kept

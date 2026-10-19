@@ -1,0 +1,10 @@
+ok - a sandbox task is observed once per cadence, never on every poll, and a busy one stays quiet
+ok - an idle sandbox worker whose observed pane stops changing surfaces as an ordinary stale wake
+ok - a VM-side dead or missing agent is reported once per incarnation, naming the recovery the host can perform
+ok - a spawn still placing a task or a control action holding it defers its observation and leaves no bookkeeping
+ok - observations crossing lifecycle locks or incarnation changes are discarded
+ok - an unreachable host is unknown: one keyed check wake per failure streak, never stale or dead
+ok - the re-ring ladder rings through the host, waits on a busy worker, and escalates a spent budget or a gone agent
+ok - the wedge timer defers on the host's worktree writes and escalates a pane that writes nothing
+ok - a sandbox task's failed GitHub token refresh wakes the watcher once per token
+ALL TESTS PASSED

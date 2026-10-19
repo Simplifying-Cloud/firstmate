@@ -1,0 +1,6 @@
+broker mint write Simplifying-Cloud/firstmate: exit=1
+error: the GitHub App configuration /home/dscott/.no-mistakes/worktrees/a1211da81307/01M58RQ39A2MMCJYAAKH46EQVY/config/cred-live-3ctgmf_1/config/github-app is mode 664; it must not be readable or writable by group or others (use chmod 600)
+final cleanup retire: exit=0
+ledger contains token value=False
+1792372889 mint-failed github task=live-gate repo=Simplifying-Cloud/firstmate access=write purpose=launch reason=config
+

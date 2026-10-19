@@ -1,0 +1,15 @@
+mint write firstmate: exit=0
+token mode=0o600
+GET /installation/repositories: HTTP 200
+repositories=["Simplifying-Cloud/firstmate"]
+GET /repos/Simplifying-Cloud/firstmate/contents/README.md: HTTP 200
+GET /repos/Simplifying-Cloud/proxmox-lab/contents/README.md: HTTP 404
+retire exit=0
+GET firstmate after retire: HTTP 401
+retire replay exit=0
+pending entries=0
+cleanup retire exit=0
+ledger contains token=False
+1792372903 mint github task=live-gate repo=Simplifying-Cloud/firstmate access=write expires=2026-10-19T02:21:43Z fp=ee8357f2de28 purpose=launch
+1792372905 revoke github task=live-gate fp=ee8357f2de28 result=revoked reason=retire
+

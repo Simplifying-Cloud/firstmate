@@ -1,0 +1,12 @@
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.claude/skills: Cannot open: Permission denied
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.agents/skills/firstmate-calm: Cannot open: Permission denied
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.test-tmp/fm-teardown-remote-task.7W2vBD/code-root: file changed as we read it
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.test-tmp/fm-teardown-remote-task.7W2vBD: file changed as we read it
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.test-tmp: file changed as we read it
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root: file changed as we read it
+tar: ./.test-tmp/fm-remote-task-control.YqHLYu: File removed before we read it
+tar: ./.test-tmp/.fm-test-procevent.598596.iWSYjz: File removed before we read it
+tar: ./.test-tmp/.fm-test-watcher.598596.C7HqR1: File removed before we read it
+tar: ./.test-tmp/fm-teardown-remote-task.7W2vBD/code-root/.claude/skills: Cannot open: Permission denied
+tar: ./.test-tmp/fm-teardown-remote-task.7W2vBD/code-root/.agents/skills/firstmate-calm: Cannot open: Permission denied
+Terminated                 ( cd "$ROOT" && tar --exclude=.git --exclude=.no-mistakes --exclude=data --exclude=state --exclude=config --exclude=projects -cf - . ) | ( cd "$CODE_ROOT" && tar -xf - )

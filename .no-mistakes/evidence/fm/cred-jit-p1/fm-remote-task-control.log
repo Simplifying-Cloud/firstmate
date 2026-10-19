@@ -1,0 +1,2 @@
+error: --for-root/--for-home: the route has its remote home inside its code root: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M58RQ39A2MMCJYAAKH46EQVY/.test-tmp/fm-remote-task-control.YqHLYu/provision/host/fm-home
+not ok - fm-brief.sh could not render a sandbox brief

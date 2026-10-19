@@ -1,0 +1,8 @@
+ok - mint writes a private token from a verifiable JWT and records it without its value
+ok - a write token asks for the ship set, with workflows only when configured
+ok - mint refuses unsafe or missing keys, malformed configuration, and malformed arguments before any request
+ok - mint refuses a 401, a 422, an unreachable API, and a token for another repository, which it revokes
+ok - incomplete mints discard tokenless responses and retain received credentials
+ok - revoke deletes a token, reads a dead one as invalid, fails an unconfirmed one, and refuses unsafe files
+ok - record-revoke records only an exact host report, and unknown verbs are usage errors
+not ok - the expiring token was replaced once (expected '2', got '1')

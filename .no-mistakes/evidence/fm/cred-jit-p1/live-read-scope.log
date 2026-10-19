@@ -1,0 +1,7 @@
+mint read: exit=0
+GitHub granted permissions={"contents": "read", "metadata": "read", "pull_requests": "read"}
+GitHub granted repositories=["Simplifying-Cloud/firstmate"]
+pending response mode=0o600
+retire exit=0
+1792372953 mint github task=read-gate repo=Simplifying-Cloud/firstmate access=read expires=2026-10-19T02:22:33Z fp=7ea840081d56 purpose=launch
+1792372953 revoke github task=read-gate fp=7ea840081d56 result=revoked reason=retire

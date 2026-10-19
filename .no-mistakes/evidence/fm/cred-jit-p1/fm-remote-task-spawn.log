@@ -1,0 +1,18 @@
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.claude/skills: Cannot open: Permission denied
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.agents/skills/firstmate-calm: Cannot open: Permission denied
+tar: ./.test-tmp/fm-remote-task-spawn.EBblHC/code-root: file changed as we read it
+tar: ./.test-tmp/fm-remote-task-control.YqHLYu/alpha.git/HEAD.lock: File removed before we read it
+tar: ./.test-tmp/fm-remote-task-control.YqHLYu/alpha.git: file changed as we read it
+tar: ./.test-tmp/fm-teardown-remote-task.7W2vBD/code-root/.claude/skills: Cannot open: Permission denied
+tar: ./.test-tmp/fm-teardown-remote-task.7W2vBD/code-root/.agents/skills/firstmate-calm: Cannot open: Permission denied
+tar: ./.test-tmp/fm-teardown-remote-task.7W2vBD/code-root/.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.test-tmp/fm-remote-task-spawn.EBblHC/code-root: file changed as we read it
+tar: ./.test-tmp/fm-teardown-remote-task.7W2vBD/code-root/.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.test-tmp/fm-remote-task-spawn.EBblHC: file changed as we read it
+tar: ./.test-tmp/fm-teardown-remote-task.7W2vBD/code-root/.test-tmp/fm-remote-task-spawn.EBblHC/code-root/.test-tmp: file changed as we read it
+tar: ./.test-tmp/.fm-test-cleanup.598596.bsCtVS: File removed before we read it
+tar: ./.test-tmp: file changed as we read it
+tar: Exiting with failure status due to previous errors
+ok - sandbox bootstrap refuses ahead and dirty code roots without discarding changes
+ok - fm-spawn --placement sandbox refuses each named case before any sandbox, record, or backlog change
+ok - fm-spawn --placement sandbox creates, converges, gates, provisions, launches, and records a ship
+ok - fm-spawn --placement sandbox sends only the selected credentials and honors a brief-authorized profile
+ok - fm-spawn --placement sandbox destroys a sandbox that fails before launch and leaves the backlog queued

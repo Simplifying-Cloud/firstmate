@@ -66,7 +66,9 @@
 #                the idle placeholders) - none of which is ever typed input.
 #   left-bar   - opencode: rows prefixed by a heavy left bar `┃` with no
 #                closing border, holding the idle hint, blank rows, and a
-#                mode/model footer line.
+#                mode/model footer line, closed by a `╹▀▀` floor row with the
+#                harness's own status row directly below it
+#                (FM_COMPOSER_OPENCODE_STATUS_RE_DEFAULT).
 #   separated  - pi: content rows between two solid horizontal `─` rules, no
 #                glyph and no side border. Provable only with a live agent
 #                identity reporting an idle/done pi (herdr `agent
@@ -475,6 +477,22 @@ FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^P
 # ("Build · GPT-5.5 Fast OpenAI · high"). It is composer furniture, not typed
 # text, and only the run's LAST row is ever matched against it.
 FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build([[:space:]]+auto)?|Plan)[[:space:]]+·[[:space:]]+'
+# OpenCode 2.x draws a status row directly BELOW that floor row: the project
+# path and git ref on the left, then state-dependent cells - keybind chords
+# when fresh, the context-usage and cost cell once a turn has run, and
+# `esc interrupt` plus progress dots while busy (verified live on opencode
+# 2.0.32, 2026-10-18, captured at 120 and 80 columns through the fm-spawn
+# worker posture):
+#   /tmp/proj:main      shift+tab agents  ctrl+p commands        (fresh idle)
+#   /tmp/proj:main      9.0K (1%) · $0.00  ctrl+p commands       (after a turn)
+#    ■■⬝⬝⬝⬝⬝⬝ esc interrupt      9.1K (1%) · $0.00  ctrl+p commands  (busy)
+# Any ONE of those tokens is positive furniture proof; the path cell alone
+# never is, because a file:line reference is ordinary prose. This is the row
+# the cursorless staleness probe reads directly below a proven left-bar
+# envelope, and before it was taught here every idle opencode 2.x pane read
+# `unknown` on every cursorless backend (herdr, zellij, cmux, orca), so
+# fm-control exit and every steer doorbell refused (observed 2026-10-17).
+FM_COMPOSER_OPENCODE_STATUS_RE_DEFAULT='esc[[:space:]]+interrupt|[0-9]+(\.[0-9]+)?[KM]?[[:space:]]+\([0-9]+%\)[[:space:]]+·[[:space:]]+\$[0-9]+(\.[0-9]+)?|(ctrl|alt|cmd)\+[a-z][[:space:]]+[a-z]+|shift\+tab[[:space:]]+[a-z]+'
 # Claude draws its permission-mode hint on its own row directly below the
 # composer (` ⏵⏵ bypass permissions on (shift+tab to cycle)`, ` ⏵⏵ accept edits
 # on`, ` ⏸ plan mode on`; verified live through Herdr on claude 2.1.236). The
@@ -1240,6 +1258,17 @@ _fm_composer_row_is_pi_status() {  # <trimmed-row>
   fm_composer_idle_matches "$1" "$FM_COMPOSER_PI_STATUS_RE_DEFAULT" sensitive
 }
 
+# _fm_composer_row_is_opencode_status: 0 when the trimmed row is OpenCode's
+# own status row (FM_COMPOSER_OPENCODE_STATUS_RE_DEFAULT above) - furniture
+# drawn below the left-bar composer's floor, which the cursorless staleness
+# probe must look past without treating it as a lower live shape. Consulted
+# only there, never as composer content, so the same tokens typed inside the
+# composer still read pending.
+_fm_composer_row_is_opencode_status() {  # <trimmed-row>
+  fm_composer_idle_matches "$1" \
+    "${FM_COMPOSER_OPENCODE_STATUS_RE:-$FM_COMPOSER_OPENCODE_STATUS_RE_DEFAULT}" sensitive
+}
+
 # _fm_composer_row_is_braille_furniture: 0 when the row is non-blank and its
 # non-whitespace content is entirely braille cells (fm_composer_strip_braille
 # above) - an animation row that never counts as typed content and bounds a
@@ -1583,6 +1612,20 @@ _fm_composer_select_cursorless() {
     next=$((boundary + 1))
     if [ "$footer" = 1 ] && [ "$FM_COMPOSER_FOOTER_AFTER" = "$boundary" ]; then
       next=$((FM_COMPOSER_FOOTER_LAST + 1))
+    fi
+    # OpenCode draws its own status row(s) directly below the left-bar floor:
+    # furniture the proven envelope already owns, so the staleness probe
+    # resumes past them exactly as it resumes past the footer zone. Any other
+    # non-blank row below the floor still marks the envelope stale.
+    if [ "$FM_COMPOSER_SELECTED_KIND" = leftbar ]; then
+      while :; do
+        raw=$(_fm_composer_screen_row "$next" "$plain")
+        trimmed=$raw
+        fm_composer_normalize_trim_var trimmed
+        [ -n "$trimmed" ] || break
+        _fm_composer_row_is_opencode_status "$trimmed" || break
+        next=$((next + 1))
+      done
     fi
     raw=$(_fm_composer_screen_row "$next" "$plain")
     trimmed=$raw

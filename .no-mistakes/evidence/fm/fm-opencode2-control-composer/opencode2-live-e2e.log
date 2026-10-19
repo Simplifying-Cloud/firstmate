@@ -1,0 +1,2 @@
+$ FM_OPENCODE2_SIGNALS_LIVE=1 bash tests/fm-opencode2-signals-live-e2e.test.sh
+ok - opencode2 opencode v2.0.32 live: standalone TUI turn drove the generated plugin busy->idle with the notification touch, and /exit left the pane

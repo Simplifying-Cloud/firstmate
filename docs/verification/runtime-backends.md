@@ -2588,7 +2588,7 @@ ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.85.1
 
 ## OpenCode 2 auto-mode composer (2026-10-17, 2026-10-18)
 
-Verified on `opencode v2.0.32` (tmux 3.6a, Herdr 0.9.1 lab session, Linux x86_64), launched in the fm-spawn worker posture (`--standalone --auto`, isolated config dir, platform-only policies, model `zai/glm-5.3-flash`).
+Verified on `opencode v2.0.32` (tmux 3.6, Herdr 0.9.1 lab session, Linux x86_64), launched in the fm-spawn worker posture (`--standalone --auto`, isolated config dir, platform-only policies, model `zai/glm-5.3-flash`).
 The empty `--auto` composer ends with `Build auto · GLM-5.3-Flash GLM via organization gateway`, which the shared classifier recognizes as furniture while preserving pending text above it, including text resembling the footer.
 
 The 2026-10-17 tmux-only verification missed the live defect: OpenCode 2.x draws its own STATUS ROW directly below the composer's `╹▀` floor (project path and git ref, then keybind chords when fresh, the context-usage and cost cell after a turn, `esc interrupt` plus progress dots while busy), and the cursorless staleness probe reads exactly that row.
@@ -2596,7 +2596,7 @@ Every idle 2.x pane therefore read `unknown` on every cursorless backend (herdr,
 The classifier now resumes past that row as furniture (`FM_COMPOSER_OPENCODE_STATUS_RE_DEFAULT` in `bin/fm-composer-lib.sh`), and anything else directly below the floor - a dead shell, unclaimed activity - still marks the envelope stale.
 
 Live evidence, 2026-10-18: a real 2.0.32 TUI idle in an isolated `fm-lab-*` Herdr pane read `empty` through the real `fm_backend_herdr_composer_state` (the exact call `fm-control` exit makes), `pending` after `pane send-text` typed one character, and `empty` again after Backspace.
-The signals live guard re-proves the cursorless read (`styled=1 cursor=0 identity=1`) of the real post-turn pane on every run; the matrix guard's cursor-mode check never covered this because its pane is tmux cursor-anchored.
+The signals live guard now re-proves the cursorless read (`styled=1 cursor=0 identity=1`) of the real post-turn pane on every run; before this, its composer check was tmux cursor-anchored and the matrix guard's cursorless check tolerates `unknown`, so neither guard could catch the defect.
 
 ```sh
 bash bin/fm-test-run.sh tests/fm-composer-lib.test.sh

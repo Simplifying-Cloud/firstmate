@@ -36,6 +36,7 @@ What is wired today:
 - [Status mirror and routed verbs](#status-mirror-and-routed-verbs): the worker's status lines reach this home's status log and wake Firstmate, scout terminal lines follow the report-fetch policy, and peek, steering, and current-state reads route to the task's host.
 - [Teardown, TTL, and orphans](#teardown-ttl-and-orphans): teardown destroys a placed task's sandbox only behind its landed-work gate, PR registration reads a sandbox ship's heads without its worktree, and session start retries pending destroys, renews TTLs, and reports orphans.
 - [Supervision and lifecycle control](#supervision-and-lifecycle-control): the watcher observes each placed task through its host on its own cadence for stale, dead-record, and unreachable wakes and the steering re-ring ladder; interrupt, exit, and relaunch run on the host, a relaunch republishes the record, and a rebooted host relaunches from the brief on disk; the fleet view shows a placed task's sandbox fields.
+- [Credentials](#credentials): a GitHub credential can be a GitHub App installation token minted at spawn for the task's one repository, refreshed while the task runs, and revoked at retirement.
 
 Real-cluster verification has passed for the reference provider on a full task lifecycle; [the verification record](verification/remote-sandboxes.md) owns its scope.
 A launch that never published its final record still needs operator reconciliation; follow [orphan handling](../.agents/skills/bootstrap-diagnostics/SKILL.md) before removing a sandbox that may hold work.
@@ -65,10 +66,20 @@ A launch that never published its final record still needs operator reconciliati
 ## Credentials
 
 Sandbox credentials are Pi API-key providers plus per-repository GitHub tokens only.
-They reach a sandbox only in its provisioning manifest, are written only on the sandbox host with mode 0600, and never appear in output, logs, or task records; [host-side task control](#host-side-task-control) owns where they land.
+They reach a sandbox only in its provisioning manifest, or for a refreshed GitHub App token on the stdin of its host's `cred-refresh` verb, are written only on the sandbox host with mode 0600, and never appear in output, logs, or task records; [host-side task control](#host-side-task-control) owns where they land.
 Project origins containing embedded passwords are refused before sandbox creation.
 The local, captain-owned `config/sandbox-credentials` selects which of them each task receives, by harness, model provider, delivery mode, and project; [the configuration reference](configuration.md#sandbox-credentials-configsandbox-credentials) owns its format.
 Host keys are pinned by the provider, not trusted on first use, and the SSH configuration the sandbox aliases live in is provider-managed.
+
+A GitHub credential whose source is `app` is a GitHub App installation token instead of a stored one, so the sandbox never holds a long-lived GitHub token.
+[`bin/fm-cred-broker.sh`](../bin/fm-cred-broker.sh) mints it at spawn, before the sandbox exists, for exactly the task's repository: read-only for a scout and read-write for a ship, expiring within an hour.
+The App's private key never leaves this home; [the configuration reference](configuration.md#github-app-configgithub-app) owns `config/github-app` and the App's permissions.
+
+- While the task runs, the watcher refreshes the token about 15 minutes before it expires, pushing a fresh one to the host's `cred-refresh` verb, which stores it the way provisioning did.
+- A failed refresh is retried every few minutes and queues one `check: sandbox <id> credential refresh failed` wake per token, before that token expires; the [broker's header](../bin/fm-cred-broker.sh) owns the cadence and its settings.
+- A ship's host revokes its token once its retirement passes, and a token minted for a spawn that never launched is revoked before the spawn exits.
+- A scout's token, and a ship's under `--force`, are not revoked on the host: they end with the sandbox's destruction and their own expiry.
+- Every mint, refresh, and revoke is recorded in this home's `state/cred-ledger` with its repository, access, expiry, and a fingerprint, never the token.
 
 ## Configure a provider
 
@@ -184,6 +195,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 - `launch`, `control`, `crew-state`, and `retire` run the host's own spawn, control plane, current-state read, and teardown, so the landed-work test that guards a local cleanup guards a sandbox's too.
   Host-side retirement supports ships only; scouts are refused because their completion gate belongs to the supervising home.
 - `state`, `observe`, `capture`, `send`, `ring`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox keyed by the primary's request id, ring that inbox's doorbell again for the watcher's re-ring ladder, and replace its brief.
+- `cred-refresh` replaces the stored GitHub token with the fresh [minted token](#credentials) the primary pushes, refusing a retired task.
 - `control` applies the [control plane's absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone) on the host before reclaiming a missing endpoint.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 
@@ -231,6 +243,7 @@ After the ownership status check, `exec` relays raw provider output and exit sta
 
 ```sh
 bin/fm-test-run.sh tests/fm-sandbox.test.sh
+bin/fm-test-run.sh tests/fm-cred-broker.test.sh
 bin/fm-test-run.sh tests/fm-remote-route-lib.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-control.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-spawn.test.sh
@@ -241,6 +254,7 @@ bin/fm-test-run.sh tests/fm-watch-sandbox-observe.test.sh
 ```
 
 The adapter suite drives every verb against a fake provider, including the refusal paths, the home-tag filtering, the capacity distinction, and argv-only invocation.
+The broker suite drives `bin/fm-cred-broker.sh` against a fake GitHub API: a JWT that verifies with its key, the request and permission set for each access level, refusals of an unsafe key file and malformed configuration, success, a 401, and a repository mismatch, the refresh and its single failure wake, and a search of the ledger, every output, and every argument for a long planted token.
 The route suite pins the task record contract and the consumer behavior described under [task routes](#task-routes), checking that routed verbs cross only the transport to the task's own host and that unsupported operations never reach the transport or a local backend, all leaving the task record unchanged.
 The task control suite drives every host-side verb against a fixture home with fake tmux, including provision idempotence and rollback, foreign-home refusal, credential file modes, and a search of every output and record for planted credential values.
 The placement suite drives `bin/fm-spawn.sh --placement sandbox` against a fake provider and a fake SSH transport that runs the real host-side control plane with fake tmux, covering the refusal matrix, the record fields, destroy before launch, the hold once launch may have started, SSH exit 255, the mirror armed at publish, and a search of every output, record, log, and argument for planted credential values.

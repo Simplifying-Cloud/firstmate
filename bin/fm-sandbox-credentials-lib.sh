@@ -4,17 +4,20 @@
 # credentials one sandbox task's provisioning manifest carries.
 #
 # Source this file and call:
-#   fm_sandbox_credentials_select <file> <harness> <model-provider> <mode> <project>
-#   fm_sandbox_credentials_manifest_fields
+#   fm_sandbox_credentials_select <file> <harness> <model-provider> <mode> <project> <origin>
+#   fm_sandbox_credentials_manifest_fields <task-id>
+#   fm_github_app_config_load <file>
 #
-# docs/configuration.md, "Sandbox credentials", owns the file format and the
-# selection rules; this header owns the mechanics. The file is local, gitignored,
-# and captain-owned. An absent file selects nothing.
+# docs/configuration.md, "Sandbox credentials" and "GitHub App", owns both file
+# formats and the selection rules; this header owns the mechanics. The files are
+# local, gitignored, and captain-owned. An absent config/sandbox-credentials
+# selects nothing.
 #
 # select checks every entry's structure and source-file safety, and checks
 # credential values for matching entries only. <mode> is the
 # ship's delivery mode, or scout for a scout; <model-provider> is the provider an
-# explicit --model <provider>/<id> names, or empty. It sets
+# explicit --model <provider>/<id> names, or empty; <origin> is the project's
+# clone URL. It sets
 # FM_SANDBOX_CREDENTIAL_GH_NAME and FM_SANDBOX_CREDENTIAL_GH_SOURCE for the one
 # github entry selected, FM_SANDBOX_CREDENTIAL_PI_NAME,
 # FM_SANDBOX_CREDENTIAL_PI_PROVIDER, and FM_SANDBOX_CREDENTIAL_PI_SOURCE for the
@@ -22,28 +25,52 @@
 # names, space-separated. It returns 1 with FM_SANDBOX_CREDENTIAL_ERROR set on
 # any refusal.
 #
+# A github entry may name the literal source app instead of a file: its token is
+# then a GitHub App installation token that bin/fm-cred-broker.sh mints for the
+# task's one repository. Any app entry needs a valid config/github-app beside
+# config/sandbox-credentials, checked even when the entry does not match. A
+# selected app entry also needs an origin on github.com, whose owner/name it
+# sets in FM_SANDBOX_CREDENTIAL_GH_REPO, with FM_SANDBOX_CREDENTIAL_GH_ACCESS set
+# to read for a scout and write for a ship.
+#
 # manifest_fields prints the selected credentials as the gh_token_b64= and
 # pi_auth_b64= lines of bin/fm-remote-task-control.sh's provisioning manifest,
 # reading each source file at that moment, and returns 1 with
 # FM_SANDBOX_CREDENTIAL_ERROR set when a file no longer holds a usable value.
+# An app source is minted at that moment for <task-id> instead, and a mint
+# failure (whose reason the broker prints on stderr) returns 1 the same way.
+#
+# fm_github_app_config_load reads config/github-app, checks its private key file
+# as select checks a source file, and sets FM_GITHUB_APP_ID,
+# FM_GITHUB_APP_INSTALLATION_ID, FM_GITHUB_APP_KEY, and FM_GITHUB_APP_WORKFLOWS
+# (on or off), or returns 1 with FM_SANDBOX_CREDENTIAL_ERROR set.
 #
 # A credential value travels only through files, pipes, and this function's
 # stdout: it is never placed in argv, the environment, or a message. Every
 # refusal names entries, destinations, and paths, never a value.
 
+FM_SANDBOX_CREDENTIALS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_SANDBOX_CREDENTIAL_ERROR=
 FM_SANDBOX_CREDENTIAL_NAMES=
 FM_SANDBOX_CREDENTIAL_GH_NAME=
 FM_SANDBOX_CREDENTIAL_GH_SOURCE=
+FM_SANDBOX_CREDENTIAL_GH_REPO=
+FM_SANDBOX_CREDENTIAL_GH_ACCESS=
 FM_SANDBOX_CREDENTIAL_PI_NAME=
 FM_SANDBOX_CREDENTIAL_PI_PROVIDER=
 FM_SANDBOX_CREDENTIAL_PI_SOURCE=
+FM_GITHUB_APP_ID=
+FM_GITHUB_APP_INSTALLATION_ID=
+FM_GITHUB_APP_KEY=
+FM_GITHUB_APP_WORKFLOWS=
 
 fm_sandbox_credentials_reset() {
   FM_SANDBOX_CREDENTIAL_ERROR=
   FM_SANDBOX_CREDENTIAL_NAMES=
   FM_SANDBOX_CREDENTIAL_GH_NAME=
   FM_SANDBOX_CREDENTIAL_GH_SOURCE=
+  FM_SANDBOX_CREDENTIAL_GH_REPO=
+  FM_SANDBOX_CREDENTIAL_GH_ACCESS=
   FM_SANDBOX_CREDENTIAL_PI_NAME=
   FM_SANDBOX_CREDENTIAL_PI_PROVIDER=
   FM_SANDBOX_CREDENTIAL_PI_SOURCE=
@@ -62,23 +89,100 @@ fm_sandbox_credential_token_ok() { # <word>
 # A source file is private to this account: a regular file, not a symlink,
 # owned by the current user, with no group or other permission bits.
 fm_sandbox_credential_source_ok() { # <entry-name> <path>
-  local name=$1 path=$2 mode
+  fm_sandbox_credential_file_ok "credential $1's source" "$2"
+}
+
+fm_sandbox_credential_file_ok() { # <label> <path>
+  local label=$1 path=$2 mode
   case "$path" in
     /*) ;;
-    *) fm_sandbox_credentials_refuse "credential $name's source '$path' must be an absolute path"; return 1 ;;
+    *) fm_sandbox_credentials_refuse "$label '$path' must be an absolute path"; return 1 ;;
   esac
   if [ -L "$path" ] || [ ! -f "$path" ]; then
-    fm_sandbox_credentials_refuse "credential $name's source $path must be a regular file, not a symlink or a missing path"
+    fm_sandbox_credentials_refuse "$label $path must be a regular file, not a symlink or a missing path"
     return 1
   fi
-  [ -O "$path" ] || { fm_sandbox_credentials_refuse "credential $name's source $path must be owned by this account"; return 1; }
-  [ -r "$path" ] || { fm_sandbox_credentials_refuse "credential $name's source $path is not readable"; return 1; }
+  [ -O "$path" ] || { fm_sandbox_credentials_refuse "$label $path must be owned by this account"; return 1; }
+  [ -r "$path" ] || { fm_sandbox_credentials_refuse "$label $path is not readable"; return 1; }
   mode=$(stat -c %a "$path" 2>/dev/null || stat -f %Lp "$path" 2>/dev/null) \
-    || { fm_sandbox_credentials_refuse "credential $name's source $path has an unreadable mode"; return 1; }
+    || { fm_sandbox_credentials_refuse "$label $path has an unreadable mode"; return 1; }
   case "$mode" in
     *00) ;;
-    *) fm_sandbox_credentials_refuse "credential $name's source $path is mode $mode; it must not be readable or writable by group or others (use chmod 600)"; return 1 ;;
+    *) fm_sandbox_credentials_refuse "$label $path is mode $mode; it must not be readable or writable by group or others (use chmod 600)"; return 1 ;;
   esac
+}
+
+fm_github_app_config_load() { # <file>
+  local file=$1 line lineno=0 key value seen=' ' first
+  FM_GITHUB_APP_ID=
+  FM_GITHUB_APP_INSTALLATION_ID=
+  FM_GITHUB_APP_KEY=
+  FM_GITHUB_APP_WORKFLOWS=off
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    fm_sandbox_credentials_refuse "the GitHub App configuration $file does not exist"
+    return 1
+  fi
+  fm_sandbox_credential_file_ok "the GitHub App configuration" "$file" || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    lineno=$((lineno + 1))
+    line=${line%$'\r'}
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in
+      *=*) key=${line%%=*} value=${line#*=} ;;
+      *) fm_sandbox_credentials_refuse "line $lineno of $file must be <key>=<value>"; return 1 ;;
+    esac
+    case "$key" in
+      app_id|installation_id|private_key|workflows) ;;
+      ''|*[!a-z_]*) fm_sandbox_credentials_refuse "line $lineno of $file has a malformed key"; return 1 ;;
+      *) fm_sandbox_credentials_refuse "line $lineno of $file sets unknown key $key; accepted keys are app_id, installation_id, private_key, and workflows"; return 1 ;;
+    esac
+    case "$seen" in *" $key "*) fm_sandbox_credentials_refuse "$file sets $key more than once"; return 1 ;; esac
+    seen="$seen$key "
+    case "$key" in
+      app_id|installation_id)
+        case "$value" in
+          ''|0*|*[!0-9]*) fm_sandbox_credentials_refuse "$file's $key must be a positive decimal number"; return 1 ;;
+        esac
+        ;;
+      workflows)
+        case "$value" in on|off) ;; *) fm_sandbox_credentials_refuse "$file's workflows must be on or off"; return 1 ;; esac
+        ;;
+    esac
+    case "$key" in
+      app_id) FM_GITHUB_APP_ID=$value ;;
+      installation_id) FM_GITHUB_APP_INSTALLATION_ID=$value ;;
+      private_key) FM_GITHUB_APP_KEY=$value ;;
+      workflows) FM_GITHUB_APP_WORKFLOWS=$value ;;
+    esac
+  done < "$file"
+  for key in app_id installation_id private_key; do
+    case "$seen" in *" $key "*) ;; *) fm_sandbox_credentials_refuse "$file does not set $key"; return 1 ;; esac
+  done
+  fm_sandbox_credential_file_ok "$file's private_key" "$FM_GITHUB_APP_KEY" || return 1
+  # Only the PEM boundary line is read, which identifies the file's kind.
+  first=$(head -n 1 "$FM_GITHUB_APP_KEY" 2>/dev/null | tr -d '\r') || first=
+  case "$first" in
+    '-----BEGIN RSA PRIVATE KEY-----'|'-----BEGIN PRIVATE KEY-----') ;;
+    *) fm_sandbox_credentials_refuse "$file's private_key $FM_GITHUB_APP_KEY is not a PEM RSA private key"; return 1 ;;
+  esac
+}
+
+# The owner/name of a github.com clone URL; 1 for any other origin.
+fm_sandbox_credential_github_repo() { # <origin>
+  local path owner name
+  case "$1" in
+    https://github.com/*) path=${1#https://github.com/} ;;
+    ssh://git@github.com/*) path=${1#ssh://git@github.com/} ;;
+    git@github.com:*) path=${1#git@github.com:} ;;
+    *) return 1 ;;
+  esac
+  path=${path%.git}
+  case "$path" in */*/*|*/) return 1 ;; */*) ;; *) return 1 ;; esac
+  owner=${path%%/*}
+  name=${path#*/}
+  case "$owner" in ''|-*|*[!A-Za-z0-9-]*) return 1 ;; esac
+  case "$name" in ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  printf '%s/%s\n' "$owner" "$name"
 }
 
 # A usable value is one line of printable ASCII without spaces, optionally
@@ -104,11 +208,13 @@ fm_sandbox_credential_list_has() { # <comma-list> <value>
   return 1
 }
 
-fm_sandbox_credentials_select() { # <file> <harness> <model-provider> <mode> <project>
-  local file=$1 harness=$2 provider=$3 mode=$4 project=$5
+fm_sandbox_credentials_select() { # <file> <harness> <model-provider> <mode> <project> <origin>
+  local file=$1 harness=$2 provider=$3 mode=$4 project=$5 origin=${6-}
   local line lineno=0 name destination source cond key value actual seen_names=' ' seen_keys matches
+  local app_checked=0 repo='' app_config
   local -a fields
   fm_sandbox_credentials_reset
+  app_config="$(dirname "$file")/github-app"
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then
     return 0
   fi
@@ -143,7 +249,19 @@ fm_sandbox_credentials_select() { # <file> <harness> <model-provider> <mode> <pr
         return 1
         ;;
     esac
-    fm_sandbox_credential_source_ok "$name" "$source" || return 1
+    if [ "$source" = app ]; then
+      [ "$destination" = github ] \
+        || { fm_sandbox_credentials_refuse "credential $name names the app source, which only a github credential may use"; return 1; }
+      if [ "$app_checked" -eq 0 ]; then
+        if ! fm_github_app_config_load "$app_config"; then
+          FM_SANDBOX_CREDENTIAL_ERROR="credential $name names the app source, but $FM_SANDBOX_CREDENTIAL_ERROR"
+          return 1
+        fi
+        app_checked=1
+      fi
+    else
+      fm_sandbox_credential_source_ok "$name" "$source" || return 1
+    fi
     matches=1
     seen_keys=' '
     for cond in "${fields[@]:3}"; do
@@ -178,13 +296,22 @@ fm_sandbox_credentials_select() { # <file> <harness> <model-provider> <mode> <pr
       [ "${destination#pi:}" = "$provider" ] || matches=0
     fi
     [ "$matches" -eq 1 ] || continue
-    fm_sandbox_credential_value_ok "$source" \
-      || { fm_sandbox_credentials_refuse "credential $name's source $source must hold one line of printable ASCII without spaces"; return 1; }
+    if [ "$source" = app ]; then
+      repo=$(fm_sandbox_credential_github_repo "$origin") \
+        || { fm_sandbox_credentials_refuse "credential $name mints a GitHub App token for the task's repository, but project $project's origin is not a github.com repository"; return 1; }
+    else
+      fm_sandbox_credential_value_ok "$source" \
+        || { fm_sandbox_credentials_refuse "credential $name's source $source must hold one line of printable ASCII without spaces"; return 1; }
+    fi
     if [ "$destination" = github ]; then
       [ -z "$FM_SANDBOX_CREDENTIAL_GH_NAME" ] \
         || { fm_sandbox_credentials_refuse "credentials $FM_SANDBOX_CREDENTIAL_GH_NAME and $name both supply the GitHub token for this task; narrow their conditions so exactly one matches"; return 1; }
       FM_SANDBOX_CREDENTIAL_GH_NAME=$name
       FM_SANDBOX_CREDENTIAL_GH_SOURCE=$source
+      if [ "$source" = app ]; then
+        FM_SANDBOX_CREDENTIAL_GH_REPO=$repo
+        if [ "$mode" = scout ]; then FM_SANDBOX_CREDENTIAL_GH_ACCESS='read'; else FM_SANDBOX_CREDENTIAL_GH_ACCESS='write'; fi
+      fi
     else
       [ -z "$FM_SANDBOX_CREDENTIAL_PI_NAME" ] \
         || { fm_sandbox_credentials_refuse "credentials $FM_SANDBOX_CREDENTIAL_PI_NAME and $name both supply Pi provider $provider for this task; narrow their conditions so exactly one matches"; return 1; }
@@ -199,27 +326,38 @@ fm_sandbox_credentials_select() { # <file> <harness> <model-provider> <mode> <pr
   return 0
 }
 
-fm_sandbox_credentials_manifest_fields() {
-  local encoded
-  if [ -n "$FM_SANDBOX_CREDENTIAL_GH_NAME" ]; then
+fm_sandbox_credentials_manifest_fields() { # <task-id>
+  local task=${1-} gh='' pi=''
+  if [ -n "$FM_SANDBOX_CREDENTIAL_GH_NAME" ] && [ "$FM_SANDBOX_CREDENTIAL_GH_SOURCE" != app ]; then
     fm_sandbox_credential_value_ok "$FM_SANDBOX_CREDENTIAL_GH_SOURCE" \
       || { fm_sandbox_credentials_refuse "credential $FM_SANDBOX_CREDENTIAL_GH_NAME's source no longer holds a usable value"; return 1; }
-    encoded=$(LC_ALL=C tr -d '\n' < "$FM_SANDBOX_CREDENTIAL_GH_SOURCE" | base64 | tr -d '\n')
-    [ -n "$encoded" ] \
+    gh=$(LC_ALL=C tr -d '\n' < "$FM_SANDBOX_CREDENTIAL_GH_SOURCE" | base64 | tr -d '\n')
+    [ -n "$gh" ] \
       || { fm_sandbox_credentials_refuse "credential $FM_SANDBOX_CREDENTIAL_GH_NAME could not be encoded"; return 1; }
-    printf 'gh_token_b64=%s\n' "$encoded"
   fi
   if [ -n "$FM_SANDBOX_CREDENTIAL_PI_NAME" ]; then
     fm_sandbox_credential_value_ok "$FM_SANDBOX_CREDENTIAL_PI_SOURCE" \
       || { fm_sandbox_credentials_refuse "credential $FM_SANDBOX_CREDENTIAL_PI_NAME's source no longer holds a usable value"; return 1; }
     # jq reads the key from stdin, so it never appears in an argument; its own
     # diagnostics could quote input, so they are discarded.
-    encoded=$(LC_ALL=C tr -d '\n' < "$FM_SANDBOX_CREDENTIAL_PI_SOURCE" \
+    pi=$(LC_ALL=C tr -d '\n' < "$FM_SANDBOX_CREDENTIAL_PI_SOURCE" \
       | jq -cRs --arg provider "$FM_SANDBOX_CREDENTIAL_PI_PROVIDER" '{($provider): {type: "api_key", key: .}}' 2>/dev/null \
       | base64 | tr -d '\n')
-    [ -n "$encoded" ] \
+    [ -n "$pi" ] \
       || { fm_sandbox_credentials_refuse "credential $FM_SANDBOX_CREDENTIAL_PI_NAME could not be encoded"; return 1; }
-    printf 'pi_auth_b64=%s\n' "$encoded"
   fi
+  # A minted token comes last, so no later refusal here can strand it.
+  if [ "$FM_SANDBOX_CREDENTIAL_GH_SOURCE" = app ]; then
+    case "$task" in ''|.|..|*[!A-Za-z0-9._-]*) fm_sandbox_credentials_refuse "an app credential is minted for one task, and none was named"; return 1 ;; esac
+    gh=$("$FM_SANDBOX_CREDENTIALS_LIB_DIR/fm-cred-broker.sh" github mint --task "$task" \
+        --repo "$FM_SANDBOX_CREDENTIAL_GH_REPO" --access "$FM_SANDBOX_CREDENTIAL_GH_ACCESS" \
+        | LC_ALL=C tr -d '\n' | base64 | tr -d '\n'
+      exit "${PIPESTATUS[0]}") \
+      || { fm_sandbox_credentials_refuse "credential $FM_SANDBOX_CREDENTIAL_GH_NAME could not mint a GitHub App token for $FM_SANDBOX_CREDENTIAL_GH_REPO"; return 1; }
+    [ -n "$gh" ] \
+      || { fm_sandbox_credentials_refuse "credential $FM_SANDBOX_CREDENTIAL_GH_NAME minted an empty GitHub App token"; return 1; }
+  fi
+  [ -z "$gh" ] || printf 'gh_token_b64=%s\n' "$gh"
+  [ -z "$pi" ] || printf 'pi_auth_b64=%s\n' "$pi"
   return 0
 }

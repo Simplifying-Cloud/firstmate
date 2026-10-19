@@ -3473,7 +3473,8 @@ teardown_public_followup_checks() {
 #      refusal is relayed, the mirror re-armed, and the sandbox, its hold label,
 #      and every record kept. SSH exit 255 is unknown completion: everything is
 #      preserved, mirror quiesced, for a rerun, which the host's retirement
-#      record makes safe.
+#      record makes safe. A passing retire also reports the host's revoke of
+#      its stored GitHub App token, which sandbox_record_host_revoke records.
 #   4. On a pass the destroy-pending record is written, the mirror's cursor
 #      retired, and this home's records removed with the backlog transition;
 #      only then is the sandbox destroyed, once, with --expect-task label
@@ -3507,6 +3508,25 @@ sandbox_mirror() { # <verb> [args...]
 sandbox_relay_host_text() { # <text>
   [ -n "$1" ] || return 0
   printf '%s\n' "$1" | LC_ALL=C tr '\000-\010\013-\037\177' '?' | head -n 50 >&2
+}
+
+# A ship's host revokes its stored GitHub App token after its teardown passes
+# and reports the result (bin/fm-remote-task-control.sh retire); this records
+# it in this home's credential ledger (bin/fm-cred-broker.sh). The report is
+# untrusted host text, so only an exact result and fingerprint pass, and a
+# ledger failure only warns, because the revoke itself already happened.
+sandbox_record_host_revoke() { # <host-output>
+  local result fp
+  result=$(printf '%s\n' "$1" | sed -n 's/^gh_token_revoke=//p' | tail -n 1)
+  fp=$(printf '%s\n' "$1" | sed -n 's/^gh_token_fp=//p' | tail -n 1)
+  case "$result" in revoked|invalid|failed) ;; *) return 0 ;; esac
+  [[ "$fp" =~ ^[0-9a-f]{12}$ ]] || return 0
+  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$SCRIPT_DIR/fm-cred-broker.sh" github record-revoke --task "$ID" --fp "$fp" --result "$result" \
+    || echo "warning: sandbox task $ID's GitHub token revoke ($result) could not be recorded in its credential ledger" >&2
+  if [ "$result" = failed ]; then
+    echo "warning: sandbox task $ID's host could not revoke its GitHub App token, which stays valid until it expires (within an hour of its last refresh); its sandbox is destroyed now" >&2
+  fi
 }
 
 sandbox_task_teardown() {
@@ -3589,6 +3609,7 @@ sandbox_task_teardown() {
         || echo "error: sandbox task $ID's status mirror could not be re-armed ($SANDBOX_MIRROR_ERROR); rerun bin/fm-procevent-remote-reply.sh arm $ID" >&2
       exit "$rc"
     fi
+    sandbox_record_host_revoke "$out"
   fi
 
   # Pass. The destroy-pending record comes first, so no later failure can leave

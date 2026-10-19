@@ -23,11 +23,13 @@
 # The credential cases plant recognizable secret values in 0600 source files
 # and search every output channel, both homes, the provision journal, the
 # transport and provider logs, the argv of every jq and base64 call, and the
-# sandbox host's tmux log and environment for them.
+# sandbox host's tmux log and environment for them. The app-source cases mint
+# GitHub App installation tokens from tests/fixtures.sh's fake GitHub API with a
+# throwaway key, and search the same places for every token it minted.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v tasks-axi >/dev/null 2>&1 || { echo "skip: tasks-axi not found"; exit 0; }
@@ -40,6 +42,9 @@ GH_SECRET="github_pat_SPAWNGHSECRET${RUN_ID}x"
 OTHER_GH_SECRET="github_pat_SPAWNOTHERGH${RUN_ID}x"
 PI_SECRET="sk-SPAWNPISECRET${RUN_ID}x"
 OTHER_PI_SECRET="sk-SPAWNGLMSECRET${RUN_ID}x"
+# Every token the fake GitHub API mints begins with this.
+APP_TOKEN_MARK="ghs_SPAWNAPP${RUN_ID}"
+export FM_FAKE_GITHUB_TOKEN_TAG="SPAWNAPP${RUN_ID}"
 
 # Host-side spawns stage per-task temp roots at /tmp/fm-<id>, outside every
 # fixture, so task ids carry this run's id and the roots are removed here.
@@ -437,14 +442,14 @@ assert_refused_before_any_sandbox() { # <label> <expected-reason>
 
 assert_no_secret_text() { # <label> <text>
   case "$2" in
-    *"$GH_SECRET"*|*"$OTHER_GH_SECRET"*|*"$PI_SECRET"*|*"$OTHER_PI_SECRET"*) fail "$1 holds a credential value" ;;
+    *"$GH_SECRET"*|*"$OTHER_GH_SECRET"*|*"$PI_SECRET"*|*"$OTHER_PI_SECRET"*|*"$APP_TOKEN_MARK"*) fail "$1 holds a credential value" ;;
   esac
 }
 
 assert_no_secret_files() { # <label> <path...>
   local label=$1 hit
   shift
-  hit=$(grep -rlF -e "$GH_SECRET" -e "$OTHER_GH_SECRET" -e "$PI_SECRET" -e "$OTHER_PI_SECRET" "$@" 2>/dev/null || true)
+  hit=$(grep -rlF -e "$GH_SECRET" -e "$OTHER_GH_SECRET" -e "$PI_SECRET" -e "$OTHER_PI_SECRET" -e "$APP_TOKEN_MARK" "$@" 2>/dev/null || true)
   [ -z "$hit" ] || fail "$label holds a credential value: $hit"
 }
 
@@ -804,9 +809,146 @@ test_code_root_verification() {
   pass "sandbox bootstrap refuses ahead and dirty code roots without discarding changes"
 }
 
+# --- GitHub App installation tokens (an app source) ---------------------------------
+
+APP_KEY_READY=0
+if command -v openssl >/dev/null 2>&1; then
+  mkdir -p "$TMP_ROOT/app-keys"
+  chmod 700 "$TMP_ROOT/app-keys"
+  if openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$TMP_ROOT/app-keys/app.pem" >/dev/null 2>&1; then
+    chmod 600 "$TMP_ROOT/app-keys/app.pem"
+    APP_KEY_READY=1
+  fi
+fi
+fm_test_fake_github_api "$LOCAL_BIN" "$TMP_ROOT/github-unused"
+
+sha12() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-12; else shasum -a 256 | cut -c1-12; fi
+}
+
+# app_case <name> [kind]: new_case with config/github-app, an app github entry
+# for alpha, a github.com origin that the sandbox account's Git rewrites to the
+# local bare repository, and a fresh fake GitHub API in $CASE/github.
+app_case() {
+  new_case "$@"
+  printf 'app_id=424242\ninstallation_id=987654321\nprivate_key=%s\nworkflows=off\n' "$TMP_ROOT/app-keys/app.pem" \
+    > "$PRIMARY/config/github-app"
+  chmod 600 "$PRIMARY/config/github-app"
+  cat > "$PRIMARY/config/sandbox-credentials" <<EOF
+gh-app   github      app                    project=alpha
+minimax  pi:minimax  $CREDS/minimax.key
+EOF
+  git -C "$PRIMARY/projects/alpha" remote set-url origin https://github.com/acme/alpha.git
+  git config --file "$HOST_ACCOUNT/.gitconfig" "url.file://$ORIGIN.insteadOf" https://github.com/acme/alpha.git
+  export FM_FAKE_GITHUB_DIR="$CASE/github"
+  mkdir -p "$FM_FAKE_GITHUB_DIR"
+}
+
+minted_count() {
+  local n=
+  n=$(grep -c . "$FM_FAKE_GITHUB_DIR/minted" 2>/dev/null) || true
+  printf '%s\n' "${n:-0}"
+}
+
+test_app_credential_mints_the_task_repository_token() {
+  local fp
+  [ "$APP_KEY_READY" = 1 ] || { echo "skip: openssl could not generate a throwaway App key"; return 0; }
+  app_case app-ship
+  sandbox_brief --mode direct-PR
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  expect_code 0 "$RC" "a sandbox ship with an app credential should launch"$'\n'"$OUT"
+  assert_contains "$OUT" "credentials=gh-app,minimax" "the success line names the app credential"
+  assert_equals 1 "$(minted_count)" "one token is minted for the launch"
+  sed -n 1p "$FM_FAKE_GITHUB_DIR/minted" | tr -d '\n' > "$CASE/launch.token"
+  cmp -s "$CASE/launch.token" "$HOST_ACCOUNT/.config/gh/hosts.yml" || fail "the sandbox account does not hold the minted token"
+  assert_equals '["alpha"]' "$(jq -c .repositories "$FM_FAKE_GITHUB_DIR/request.1.json")" "the token is for the task's one repository"
+  assert_equals '{"actions":"read","checks":"read","contents":"write","issues":"write","metadata":"read","pull_requests":"write","statuses":"read"}' \
+    "$(jq -cS .permissions "$FM_FAKE_GITHUB_DIR/request.1.json")" "a ship's token asks for the write set"
+  fp=$(tr -d '\n' < "$CASE/launch.token" | sha12)
+  grep -Eq "^[0-9]+ mint github task=$ID repo=acme/alpha access=write expires=[^ ]+ fp=$fp purpose=launch$" "$PRIMARY/state/cred-ledger" \
+    || fail "the launch mint is not recorded: $(cat "$PRIMARY/state/cred-ledger" 2>/dev/null)"
+  assert_absent "$FM_FAKE_GITHUB_DIR/revoked" "a launched task's token is never revoked by its spawn"
+  assert_no_secret_anywhere "an app credential"
+
+  app_case app-scout scout
+  sandbox_brief --scout
+  SSH_MODE=launch-stub STUB_HARNESS=pi STUB_MODEL=minimax/m2 \
+    run_spawn "$ID" "$PRIMARY/projects/alpha" --scout --harness pi --model minimax/m2 --placement sandbox
+  expect_code 0 "$RC" "a sandbox scout with an app credential should launch"$'\n'"$OUT"
+  assert_equals '{"contents":"read","metadata":"read","pull_requests":"read"}' \
+    "$(jq -cS .permissions "$FM_FAKE_GITHUB_DIR/request.1.json")" "a scout's token is read-only"
+  grep -q " mint github task=$ID repo=acme/alpha access=read " "$PRIMARY/state/cred-ledger" || fail "the scout's read mint is not recorded"
+  assert_no_secret_anywhere "an app credential for a scout"
+  pass "an app credential mints a token for exactly the task's repository, write for a ship and read for a scout, and records it"
+}
+
+test_app_credential_refusals_happen_before_any_sandbox() {
+  [ "$APP_KEY_READY" = 1 ] || { echo "skip: openssl could not generate a throwaway App key"; return 0; }
+  app_case app-refuse
+  sandbox_brief --mode direct-PR
+  printf '401\n' > "$FM_FAKE_GITHUB_DIR/mode"
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  assert_refused_before_any_sandbox "a mint failure" "GitHub refused an installation token for acme/alpha (HTTP 401"
+  assert_contains "$OUT" "credential gh-app could not mint a GitHub App token for acme/alpha" "the refusal names the credential"
+  assert_contains "$(cat "$PRIMARY/state/cred-ledger")" "mint-failed github task=$ID repo=acme/alpha access=write purpose=launch reason=http-401" \
+    "the mint failure is recorded"
+  rm -f "$FM_FAKE_GITHUB_DIR/mode"
+
+  git -C "$PRIMARY/projects/alpha" remote set-url origin "file://$ORIGIN"
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  assert_refused_before_any_sandbox "an origin off github.com" "project alpha's origin is not a github.com repository"
+  git -C "$PRIMARY/projects/alpha" remote set-url origin https://github.com/acme/alpha.git
+
+  mv "$PRIMARY/config/github-app" "$CASE/github-app.off"
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  assert_refused_before_any_sandbox "no GitHub App configuration" "credential gh-app names the app source, but the GitHub App configuration"
+  mv "$CASE/github-app.off" "$PRIMARY/config/github-app"
+
+  printf 'pi-app  pi:glm  app\n' >> "$PRIMARY/config/sandbox-credentials"
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  assert_refused_before_any_sandbox "an app Pi credential" "credential pi-app names the app source, which only a github credential may use"
+  assert_equals 0 "$(minted_count)" "no refused spawn holds a minted token"
+  assert_no_secret_anywhere "app credential refusals"
+  pass "an app credential's mint failure, origin, configuration, and destination are refused before any sandbox exists"
+}
+
+test_app_token_is_revoked_when_the_spawn_never_launches() {
+  local fp
+  [ "$APP_KEY_READY" = 1 ] || { echo "skip: openssl could not generate a throwaway App key"; return 0; }
+  app_case app-unready
+  sandbox_brief --mode direct-PR
+  SSH_MODE=doctor-human run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  [ "$RC" -ne 0 ] || fail "an unready sandbox host launched"
+  assert_contains "$OUT" "task $ID's GitHub App token was never used, so it was revoked" "the spawn reports the revoke"
+  assert_line "sbx-$ID" "$CASE/provider/destroyed.log" "the unready sandbox is destroyed"
+  cmp -s "$FM_FAKE_GITHUB_DIR/minted" "$FM_FAKE_GITHUB_DIR/revoked" || fail "the unused launch token was not revoked"
+  fp=$(sed -n 1p "$FM_FAKE_GITHUB_DIR/minted" | tr -d '\n' | sha12)
+  grep -q " revoke github task=$ID fp=$fp result=revoked$" "$PRIMARY/state/cred-ledger" || fail "the revoke is not recorded"
+  assert_no_secret_anywhere "an unready host with an app credential"
+
+  app_case app-full
+  sandbox_brief --mode direct-PR
+  : > "$CASE/provider/no-capacity"
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  assert_contains "$OUT" "has no capacity for task $ID" "the capacity blocker is named"
+  assert_contains "$OUT" "GitHub App token was never used, so it was revoked" "a token minted for a sandbox that was never created is revoked"
+  cmp -s "$FM_FAKE_GITHUB_DIR/minted" "$FM_FAKE_GITHUB_DIR/revoked" || fail "the token minted before creation was not revoked"
+
+  app_case app-lost
+  sandbox_brief --mode direct-PR
+  SSH_MODE=launch-lost run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  expect_code 255 "$RC" "an SSH 255 at launch is preserved"
+  assert_absent "$FM_FAKE_GITHUB_DIR/revoked" "a token a launched worker may be using is never revoked"
+  assert_no_secret_anywhere "a lost launch with an app credential"
+  pass "a token minted for a spawn that never launches is revoked, and one a worker may hold is kept"
+}
+
 test_code_root_verification
 test_refusals_happen_before_any_sandbox_exists
 test_ship_launches_in_a_sandbox_and_records_its_route
 test_scout_sends_only_its_providers_credential_on_an_authorized_profile
 test_failures_before_launch_destroy_the_sandbox
 test_launch_failures_hold_the_sandbox_and_its_route
+test_app_credential_mints_the_task_repository_token
+test_app_credential_refusals_happen_before_any_sandbox
+test_app_token_is_revoked_when_the_spawn_never_launches

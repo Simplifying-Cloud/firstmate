@@ -115,6 +115,11 @@
 #   check: inactive-outcome bounded poll-loop reconciliation found a suspicious
 #                          inactive terminal outcome that still lacks its durable
 #                          upstream receipt
+#   check: sandbox <id> credential refresh failed: <why>
+#                          bin/fm-cred-broker.sh refresh-due could not replace a
+#                          sandbox task's expiring GitHub App token; it queues
+#                          one keyed wake per current token and keeps retrying
+#                          silently, joining several tasks' reasons with " | "
 #   check: secondmate wake-loop stalled: mate=<id> row=<seq> idle=<seconds>s
 #                          an actionable row in an endpoint-recorded local
 #                          secondmate home's durable wake queue did not advance
@@ -400,6 +405,12 @@ REMOTE_OBSERVE_TIMEOUT=${FM_REMOTE_OBSERVE_TIMEOUT:-}
 case "$REMOTE_OBSERVE_TIMEOUT" in ''|*[!0-9]*|0) REMOTE_OBSERVE_TIMEOUT=20 ;; esac
 REMOTE_UNREACHABLE_COUNT=${FM_REMOTE_UNREACHABLE_COUNT:-}
 case "$REMOTE_UNREACHABLE_COUNT" in ''|*[!0-9]*|0) REMOTE_UNREACHABLE_COUNT=3 ;; esac
+# The GitHub App tokens minted for sandbox tasks are refreshed before they
+# expire by bin/fm-cred-broker.sh refresh-due, run on that same
+# REMOTE_OBSERVE_SECS cadence while this home has a credential ledger and
+# bounded by CRED_REFRESH_TIMEOUT.
+CRED_REFRESH_TIMEOUT=${FM_CRED_REFRESH_TIMEOUT:-}
+case "$CRED_REFRESH_TIMEOUT" in ''|*[!0-9]*|0) CRED_REFRESH_TIMEOUT=180 ;; esac
 # A crew that declared a pause is idling on a known external wait, so its stale
 # pane is absorbed rather than wedge-escalated.
 # A captain-held or paused crew whose agent has confidently exited uses the same
@@ -3227,6 +3238,23 @@ while :; do
     fi
   else
     triage_log "inactive-outcome reconciliation unavailable"
+  fi
+
+  # Sandbox tasks' minted GitHub tokens, refreshed before they expire. Silent
+  # unless a refresh failed: the broker has then already queued that token's
+  # one keyed check wake and prints its reason.
+  if [ -f "$STATE/cred-ledger" ] && [ "$(age_of "$STATE/.cred-refresh-tick")" -ge "$REMOTE_OBSERVE_SECS" ]; then
+    touch "$STATE/.cred-refresh-tick" || true
+    cred_refresh_out=
+    if cred_refresh_out=$(fm_run_timed "$CRED_REFRESH_TIMEOUT" env FM_HOME="$FM_HOME" \
+      FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
+      "$SCRIPT_DIR/fm-cred-broker.sh" github refresh-due 2>/dev/null); then
+      if [ -n "$cred_refresh_out" ]; then
+        wake "$(printf '%s\n' "$cred_refresh_out" | awk 'NF { printf "%s%s", sep, $0; sep = " | " } END { print "" }')"
+      fi
+    else
+      triage_log "sandbox credential refresh unavailable"
+    fi
   fi
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).

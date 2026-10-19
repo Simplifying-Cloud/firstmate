@@ -383,7 +383,10 @@ test_api_refusals_and_a_repository_mismatch() {
   printf 'unreachable\n' > "$GH_DIR/mode"
   run_broker github mint --task t-api --repo acme/alpha --access write --out "$CASE/out/a.token"
   assert_contains "$ERR" "GitHub could not be reached to mint a token for acme/alpha" "a transport failure is named"
-  assert_contains "$(ledger_line 3)" "reason=unreachable" "a transport failure is recorded"
+  assert_contains "$(ledger_line 3)" "reason=unreachable outcome=unknown" "an unknown mint outcome is recorded"
+  assert_equals 0 "$(pending_count t-api)" "an unreachable mint leaves no tokenless pending record"
+  run_broker github retire --task t-api
+  expect_code 0 "$RC" "retirement succeeds after an unreachable mint"
 
   printf 'mismatch\n' > "$GH_DIR/mode"
   run_broker github mint --task t-api --repo acme/alpha --access write --out "$CASE/out/a.token"
@@ -397,6 +400,48 @@ test_api_refusals_and_a_repository_mismatch() {
   assert_no_jwt_in_argv "refused mints"
   assert_no_token_anywhere "refused mints"
   pass "mint refuses a 401, a 422, an unreachable API, and a token for another repository, which it revokes"
+}
+
+test_incomplete_mint_responses() {
+  local mode
+  mv "$FAKEBIN/curl" "$FAKEBIN/curl-api"
+  cat > "$FAKEBIN/curl" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "$FM_FAKE_GITHUB_DIR/reply-mode")
+if [ "$mode" = received ]; then
+  "${0%/*}/curl-api" "$@"
+  exit 28
+fi
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --output ]; then output=$2; shift; fi
+  shift
+done
+case "$mode" in
+  timeout) exit 28 ;;
+  truncated) printf '{"token":"ghs_incomplete"' > "$output" ;;
+  nonjson) printf 'upstream unavailable' > "$output" ;;
+esac
+printf 201
+SH
+  chmod +x "$FAKEBIN/curl"
+  for mode in timeout truncated nonjson received; do
+    new_case "incomplete-$mode"
+    printf '%s\n' "$mode" > "$GH_DIR/reply-mode"
+    run_broker github mint --task t-incomplete --repo acme/alpha --access write
+    [ "$RC" -ne 0 ] || fail "an incomplete mint was accepted"
+    assert_contains "$(tail -n 1 "$LEDGER")" "outcome=unknown" "unknown mint is recorded without its value"
+    if [ "$mode" = received ]; then
+      assert_equals 1 "$(pending_count t-incomplete)" "a received token survives a transport error"
+      assert_pending_private t-incomplete
+    else
+      assert_equals 0 "$(pending_count t-incomplete)" "a tokenless response is removed"
+      run_broker github retire --task t-incomplete
+      expect_code 0 "$RC" "a tokenless failed mint cannot block retirement"
+    fi
+    assert_no_token_anywhere "incomplete mint"
+  done
+  mv "$FAKEBIN/curl-api" "$FAKEBIN/curl"
+  pass "incomplete mints discard tokenless responses and retain received credentials"
 }
 
 # --- revoke -------------------------------------------------------------------------
@@ -818,6 +863,7 @@ test_mint_writes_a_private_token_and_a_valueless_ledger_line
 test_write_access_requests_the_ship_set
 test_refuses_unsafe_keys_and_malformed_input
 test_api_refusals_and_a_repository_mismatch
+test_incomplete_mint_responses
 test_revoke_kills_a_token_and_records_it
 test_record_revoke_validates_the_host_report
 test_refresh_due_replaces_an_expiring_token_on_its_host

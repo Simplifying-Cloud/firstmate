@@ -29,6 +29,8 @@
 # discard returned credentials. Each record holds the token and expires_at.
 # A mint is ledgered before delivery; a refused mint attempts cleanup revocation.
 # Confirmed revocation removes the matching pending record; failures retain it.
+# Responses without a parseable token are discarded. A token GitHub may have
+# issued but the broker never received cannot be revoked and expires within the hour.
 #
 # revoke presents the token in --token-file, a private file holding it on one
 # line, to DELETE /installation/token: 2xx is revoked, 401/404 is invalid (already
@@ -64,7 +66,7 @@
 # line and never a credential value; fp is the first 12 hex digits of the
 # token's SHA-256:
 #   <epoch> mint github task=<id> repo=<owner/name> access=<a> expires=<iso> fp=<fp> purpose=launch|refresh
-#   <epoch> mint-failed github task=<id> repo=<owner/name> access=<a> purpose=<p> reason=<slug>
+#   <epoch> mint-failed github task=<id> repo=<owner/name> access=<a> purpose=<p> reason=<slug> [outcome=unknown]
 #   <epoch> refresh github task=<id> fp=<fp> expires=<iso> result=delivered
 #   <epoch> refresh github task=<id> result=failed|unknown reason=<slug> alerted=yes|no [fp=<fp>]
 #   <epoch> revoke github task=<id> fp=<fp> result=revoked|invalid|expired|failed [reason=<slug>] [via=host]
@@ -280,8 +282,15 @@ MINT_DIAG=
 MINT_PENDING=
 
 mint_refused() { # <task> <repo> <access> <purpose> <reason> <diagnostic>
+  local outcome=
   MINT_DIAG=$6
-  ledger_append "mint-failed github task=$1 repo=$2 access=$3 purpose=$4 reason=$5" || true
+  if [ -n "$MINT_PENDING" ] && [ -f "$MINT_PENDING" ] \
+      && ! jq -e '.token | type == "string" and startswith("ghs_")' "$MINT_PENDING" >/dev/null 2>&1; then
+    rm -f -- "$MINT_PENDING"
+    case "$5" in unreachable|response) outcome=" outcome=unknown" ;; esac
+  fi
+  [ "$5" != unreachable ] || outcome=" outcome=unknown"
+  ledger_append "mint-failed github task=$1 repo=$2 access=$3 purpose=$4 reason=$5$outcome" || true
   return 1
 }
 
@@ -326,7 +335,6 @@ github_mint() { # <task> <repo> <access> <purpose> <token-file>
   jwt=
   if [ "$status" != 201 ]; then
     message=$(github_message "$MINT_PENDING")
-    rm -f -- "$MINT_PENDING"
     case "$status" in ''|*[!0-9]*) status=unknown ;; esac
     mint_refused "$task" "$repo" "$access" "$purpose" "http-$status" \
       "GitHub refused an installation token for $repo (HTTP $status${message:+: $message})"

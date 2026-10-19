@@ -409,8 +409,7 @@ case "$REMOTE_UNREACHABLE_COUNT" in ''|*[!0-9]*|0) REMOTE_UNREACHABLE_COUNT=3 ;;
 # expire by bin/fm-cred-broker.sh refresh-due, run on that same
 # REMOTE_OBSERVE_SECS cadence while this home has a credential ledger and
 # bounded by CRED_REFRESH_TIMEOUT.
-CRED_REFRESH_TIMEOUT=${FM_CRED_REFRESH_TIMEOUT:-}
-case "$CRED_REFRESH_TIMEOUT" in ''|*[!0-9]*|0) CRED_REFRESH_TIMEOUT=180 ;; esac
+CRED_REFRESH_TIMEOUT=180
 # A crew that declared a pause is idling on a known external wait, so its stale
 # pane is absorbed rather than wedge-escalated.
 # A captain-held or paused crew whose agent has confidently exited uses the same

@@ -182,7 +182,9 @@ case "$*" in
   "auth token --hostname github.com") cat "$store/hosts.yml" 2>/dev/null ;;
   "api --method DELETE /installation/token --include")
     printf 'revoke\n' >> "$HOME/../gh.revokes"
-    printf 'HTTP/2.0 204 No Content\r\n\r\n'
+    code=$(cat "$HOME/../gh-revoke-status" 2>/dev/null || echo 204)
+    printf 'HTTP/2.0 %s Response\r\n\r\n' "$code"
+    [ "$code" = 204 ] || exit 1
     ;;
   *) exit 1 ;;
 esac
@@ -489,8 +491,8 @@ test_landed_ship_destroys_exactly_once_after_its_records() {
 }
 
 test_landed_ship_records_its_hosts_app_token_revoke() {
-  local fp hit
-  new_case app-revoke
+  local fp hit closure=${1:-revoked}
+  new_case "app-revoke-$closure"
   APP_TOKEN="ghs_TEARDOWNAPP${RUN_ID}$(printf 'Ab9_%.0s' $(seq 1 100))"
   (umask 077; printf '%s\n' "$APP_TOKEN" > "$CREDS/app-$RUN_ID.token")
   printf 'gh-app  github  %s\n' "$CREDS/app-$RUN_ID.token" >> "$PRIMARY/config/sandbox-credentials"
@@ -498,11 +500,23 @@ test_landed_ship_records_its_hosts_app_token_revoke() {
   run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   expect_code 0 "$RC" "a sandbox ship holding an App token should launch"$'\n'"$OUT"
   land_work
+  printf '502\n' > "$HOST_DIR/gh-revoke-status"
+  run_teardown
+  [ "$RC" -ne 0 ] || fail "unconfirmed revocation completed teardown"
+  assert_equals 0 "$(destroy_calls)" "failed revocation preserves the sandbox"
+  assert_absent "$HOST_HOME/state/$ID.retired" "failed revocation leaves retirement open"
+  assert_contains "$(tail -n 1 "$PRIMARY/state/cred-ledger")" 'result=failed via=host' "the supervisor records failed revocation"
+  if [ "$closure" = expired ]; then
+    fp=$(printf '%s' "$APP_TOKEN" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-12)
+    printf '1 mint github task=%s fp=%s expires=2000-01-01T00:00:00Z\n' "$ID" "$fp" >> "$PRIMARY/state/cred-ledger"
+  else
+    printf '204\n' > "$HOST_DIR/gh-revoke-status"
+  fi
   run_teardown
   expect_code 0 "$RC" "teardown of a landed sandbox ship"$'\n'"$OUT"
   fp=$(printf '%s' "$APP_TOKEN" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-12)
-  assert_equals 1 "$(grep -c . "$HOST_DIR/gh.revokes")" "the host revoked its stored App token once"
-  grep -Eq "^[0-9]+ revoke github task=$ID fp=$fp result=revoked via=host$" "$PRIMARY/state/cred-ledger" \
+  assert_equals 2 "$(grep -c . "$HOST_DIR/gh.revokes")" "the host retries an unconfirmed revoke"
+  grep -Eq "^[0-9]+ revoke github task=$ID fp=$fp result=$closure via=host$" "$PRIMARY/state/cred-ledger" \
     || fail "this home's credential ledger does not record the host's revoke: $(cat "$PRIMARY/state/cred-ledger" 2>/dev/null)"
   case "$OUT" in *"$APP_TOKEN"*) fail "teardown output holds the App token" ;; esac
   hit=$(grep -rlF "$APP_TOKEN" "$PRIMARY" "$HOST_HOME" "$CASE/ssh.log" 2>/dev/null || true)
@@ -724,6 +738,7 @@ test_scout_report_and_completion_gates() {
 test_unlanded_ship_refusal_keeps_the_sandbox
 test_landed_ship_destroys_exactly_once_after_its_records
 test_landed_ship_records_its_hosts_app_token_revoke
+test_landed_ship_records_its_hosts_app_token_revoke expired
 test_ssh_255_preserves_everything_until_a_rerun
 test_force_destroys_without_the_landed_proof
 test_identity_refusals_hold_under_force

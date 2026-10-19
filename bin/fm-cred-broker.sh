@@ -6,7 +6,7 @@
 #   fm-cred-broker.sh github mint --task <id> --repo <owner/name> --access read|write [--out <file>]
 #   fm-cred-broker.sh github revoke --token-file <file>
 #   fm-cred-broker.sh github refresh-due
-#   fm-cred-broker.sh github record-revoke --task <id> --fp <fingerprint> --result revoked|invalid|failed
+#   fm-cred-broker.sh github record-revoke --task <id> --fp <fingerprint> --result revoked|invalid|expired|failed
 #
 # The one credential issued today is a GitHub App installation token for a
 # sandbox task; docs/remote-sandboxes.md#credentials owns the operator view.
@@ -32,20 +32,20 @@
 #
 # refresh-due keeps each live sandbox task's minted token fresh. For every task
 # record this home places in a sandbox (bin/fm-remote-route-lib.sh) whose
-# current token expires, by the ledger, within FM_CRED_REFRESH_LEAD_SECS
-# (default 900), it mints a token for the same repository and access and pushes
+# current token expires, by the ledger, within 900 seconds, it mints a token
+# for the same repository and access and pushes
 # it through bin/fm-on.sh to the host's cred-refresh verb
 # (bin/fm-remote-task-control.sh), which stores it and confirms its fingerprint.
 # A task whose spawn or control lock is held is skipped for that pass, and the
 # control lock is held across the refresh. A success is silent. A host that
 # refuses leaves its stored token unchanged, so the new token is revoked; a
-# reply that never arrives (SSH exit 255, the FM_CRED_REFRESH_PUSH_TIMEOUT bound
-# of default 60 seconds, or an unconfirmed fingerprint) keeps it, because the
-# host may hold it. Either failure waits FM_CRED_REFRESH_RETRY_SECS (default
-# 300) before the next attempt and queues one keyed check wake per current
+# reply that never arrives (SSH exit 255, the 60-second delivery bound, or an
+# unconfirmed fingerprint) keeps it, because the host may hold it. Either
+# failure waits 300 seconds before retrying and queues one wake per current
 # token, `check: sandbox <id> credential refresh failed: ...`, printing that
 # reason on stdout for bin/fm-watch.sh to surface; later failures for the same
-# token are recorded silently.
+# token are recorded silently; tasks run soonest expiry first within a 150-second
+# pass budget, reserving 105 seconds before starting each bounded attempt.
 #
 # record-revoke records the revoke a sandbox host's retire made with the task's
 # stored token, which bin/fm-teardown.sh relays from the host's report.
@@ -57,7 +57,7 @@
 #   <epoch> mint-failed github task=<id> repo=<owner/name> access=<a> purpose=<p> reason=<slug>
 #   <epoch> refresh github task=<id> fp=<fp> expires=<iso> result=delivered
 #   <epoch> refresh github task=<id> result=failed|unknown reason=<slug> alerted=yes|no [fp=<fp>]
-#   <epoch> revoke github task=<id> fp=<fp> result=revoked|invalid|failed [reason=<slug>] [via=host]
+#   <epoch> revoke github task=<id> fp=<fp> result=revoked|invalid|expired|failed [reason=<slug>] [via=host]
 # A task's current token is its latest launch mint, or the latest delivered
 # refresh after it; once that token is revoked the task is never refreshed.
 #
@@ -84,17 +84,25 @@ CURL_MAX_TIME=20
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '5,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
-seconds_or() { # <value> <default>; zero or invalid values use the default
-  case "$1" in ''|0|*[!0-9]*) printf '%s\n' "$2" ;; *) printf '%s\n' "$1" ;; esac
+LEAD_SECS=900
+RETRY_SECS=300
+PUSH_TIMEOUT=60
+PASS_BUDGET=150
+ATTEMPT_BUDGET=105
+ACTIVE_TASK=
+
+refresh_interrupted() {
+  if [ -n "$ACTIVE_TASK" ]; then
+    refresh_failed "$ACTIVE_TASK" unknown interrupted "the refresh attempt was interrupted"
+    fm_lock_release "$STATE/.control-$ACTIVE_TASK.lock" || true
+  fi
+  exit 1
 }
-LEAD_SECS=$(seconds_or "${FM_CRED_REFRESH_LEAD_SECS:-}" 900)
-RETRY_SECS=$(seconds_or "${FM_CRED_REFRESH_RETRY_SECS:-}" 300)
-PUSH_TIMEOUT=$(seconds_or "${FM_CRED_REFRESH_PUSH_TIMEOUT:-}" 60)
 
 WORK=
 cleanup() { [ -z "$WORK" ] || rm -rf -- "$WORK"; }
 trap cleanup EXIT
-trap 'exit 1' HUP INT TERM
+trap refresh_interrupted HUP INT TERM
 
 work_dir() {
   [ -z "$WORK" ] || return 0
@@ -380,7 +388,7 @@ cmd_record_revoke() {
   done
   valid_task "$task" || die "record-revoke needs --task <id>"
   valid_fp "$fp" || die "record-revoke needs --fp <12 hex digits>"
-  case "$result" in revoked|invalid|failed) ;; *) die "record-revoke needs --result revoked, invalid, or failed" ;; esac
+  case "$result" in revoked|invalid|expired|failed) ;; *) die "record-revoke needs --result revoked, invalid, expired, or failed" ;; esac
   ledger_append "revoke github task=$task fp=$fp result=$result via=host" \
     || die "the host's revoke of fp=$fp could not be recorded in $LEDGER"
 }
@@ -413,7 +421,7 @@ ledger_current() { # <task>
       fp = field("fp"); expires = field("expires"); failed = "-"; alerted = 0; next
     }
     $2 == "refresh" { failed = $1; if (field("alerted") == "yes") alerted = 1; next }
-    $2 == "revoke" && field("fp") == fp { revoked = 1 }
+    $2 == "revoke" && field("fp") == fp && (field("result") == "revoked" || field("result") == "invalid" || field("result") == "expired") { revoked = 1 }
     END { if (have) print fp, expires, repo, access, revoked, failed, alerted }' "$LEDGER" 2>/dev/null) || return 1
   [ -n "$line" ] || return 1
   read -r CUR_FP CUR_EXPIRES CUR_REPO CUR_ACCESS CUR_REVOKED CUR_FAILED_AT CUR_ALERTED <<< "$line"
@@ -435,6 +443,7 @@ refresh_failed() { # <task> <result> <reason> <diagnostic> [<minted-fp>]
     if fm_wake_queued_keys check | grep -Fx -- "$key" >/dev/null 2>&1 \
       || fm_wake_append check "$key" "$text"; then
       alerted=yes
+      CUR_ALERTED=1
       printf '%s\n' "$text"
     fi
   fi
@@ -459,6 +468,7 @@ refresh_task() { # <task>
   esac
   ! lock_live "$STATE/.spawn-$task.lock" || return 0
   fm_lock_try_acquire "$STATE/.control-$task.lock" || return 0
+  ACTIVE_TASK=$task
   work_dir
   rm -f -- "$WORK/token"
   if ! github_mint "$task" "$CUR_REPO" "$CUR_ACCESS" refresh "$WORK/token"; then
@@ -494,7 +504,7 @@ refresh_task() { # <task>
 }
 
 cmd_refresh_due() {
-  local meta task
+  local meta task expires started now
   [ "$#" -eq 0 ] || usage
   [ -f "$LEDGER" ] && [ ! -L "$LEDGER" ] || return 0
   LC_ALL=C grep -qx 'placement=sandbox' "$STATE"/*.meta 2>/dev/null || return 0
@@ -506,6 +516,9 @@ cmd_refresh_due() {
   . "$SCRIPT_DIR/fm-remote-route-lib.sh"
   # shellcheck source=bin/fm-classify-lib.sh
   . "$SCRIPT_DIR/fm-classify-lib.sh"
+  started=$(date +%s)
+  work_dir
+  : > "$WORK/due"
   for meta in "$STATE"/*.meta; do
     [ -f "$meta" ] && [ ! -L "$meta" ] || continue
     task=$(basename "$meta" .meta)
@@ -513,8 +526,15 @@ cmd_refresh_due() {
     LC_ALL=C grep -q '^placement=' "$meta" 2>/dev/null || continue
     fm_remote_route_resolve "$meta" "$task" || continue
     [ "$FM_REMOTE_ROUTE_KIND" = task ] || continue
-    refresh_task "$task"
+    ledger_current "$task" || continue
+    printf '%s %s\n' "$CUR_EXPIRES" "$task" >> "$WORK/due"
   done
+  while read -r expires task; do
+    now=$(date +%s)
+    [ "$((now - started + ATTEMPT_BUDGET))" -le "$PASS_BUDGET" ] || break
+    refresh_task "$task"
+    ACTIVE_TASK=
+  done < <(LC_ALL=C sort "$WORK/due")
 }
 
 # --- dispatch -------------------------------------------------------------------

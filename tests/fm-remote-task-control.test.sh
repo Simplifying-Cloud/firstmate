@@ -1046,9 +1046,40 @@ test_retire_revokes_a_stored_app_token() {
   printf 'bash\n' > "$TMUX_DIR/pane-command"
   printf '502\n' > "$CASE/gh-revoke-status"
   out=$(run_control retire "$ID" 2>&1); rc=$?
-  expect_code 0 "$rc" "a failed revoke never blocks a passing retire"$'\n'"$out"
+  expect_code 1 "$rc" "a failed revoke blocks retirement"$'\n'"$out"
   assert_contains "$out" "gh_token_revoke=failed" "a revoke GitHub did not confirm is reported as failed"
-  assert_present "$TASK_HOME/state/$ID.retired" "the retirement is still recorded"
+  assert_absent "$TASK_HOME/state/$ID.retired" "an unconfirmed revoke keeps retirement retryable"
+  printf '204\n' > "$CASE/gh-revoke-status"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "a later confirmed revoke completes retirement"$'\n'"$out"
+  assert_present "$TASK_HOME/state/$ID.retired" "confirmed retirement is recorded"
+  assert_equals 2 "$(grep -c . "$CASE/gh.revokes")" "the failed revoke is retried"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "successful retirement replays"
+  assert_equals 2 "$(grep -c . "$CASE/gh.revokes")" "replay does not revoke again"
+
+  new_case retire-app-expiry
+  write_manifest "$CASE/manifest" ship claude
+  manifest_set "$CASE/manifest" gh_token_b64 "gh_token_b64=$(printf '%s' "$APP_SECRET" | b64)"
+  run_control provision "$ID" < "$CASE/manifest" >/dev/null 2>&1 || fail "provision failed"
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  printf '502\n' > "$CASE/gh-revoke-status"
+  printf '1 mint github task=%s fp=%s expires=2099-01-01T00:00:00Z\n' "$ID" "$fp" > "$CASE/ledger"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 1 "$rc" "a live token cannot close retirement"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 1 "$rc" "persistent failure stays retryable"
+  assert_absent "$TASK_HOME/state/$ID.retired" "no marker exists before expiry"
+  printf '1 mint github task=%s fp=%s expires=2000-01-01T00:00:00Z\n' "$ID" "$fp" > "$CASE/ledger"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 0 "$rc" "ledger expiry closes persistent revoke failure"$'\n'"$out"
+  assert_contains "$out" 'gh_token_revoke=expired' "expiry is distinguished from revocation"
+  out=$(run_control retire "$ID" < "$CASE/ledger" 2>&1); rc=$?
+  expect_code 0 "$rc" "expiry closure replays"
+  assert_contains "$out" 'gh_token_revoke=expired' "replay retains the closure reason"
+  assert_equals 3 "$(grep -c . "$CASE/gh.revokes")" "expiry replay does not repeat revocation"
   pass "retire revokes a stored App installation token once, reports it, and keeps the result for a retry"
 }
 

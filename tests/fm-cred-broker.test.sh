@@ -31,6 +31,25 @@ export REAL_JQ
 FAKEBIN=$(fm_fakebin "$TMP_ROOT/fake")
 fm_test_fake_github_api "$FAKEBIN" "$TMP_ROOT/github-unused"
 
+REAL_DATE=$(command -v date)
+export REAL_DATE
+cat > "$FAKEBIN/date" <<'SH'
+#!/usr/bin/env bash
+if [ "$*" = +%s ]; then
+  offset=$(cat "$FM_FAKE_GITHUB_DIR/clock-offset" 2>/dev/null || echo 0)
+  echo "$(( $("$REAL_DATE" +%s) + offset ))"
+else
+  exec "$REAL_DATE" "$@"
+fi
+SH
+chmod +x "$FAKEBIN/date"
+
+advance_clock() {
+  local offset
+  offset=$(cat "$GH_DIR/clock-offset" 2>/dev/null || echo 0)
+  echo "$((offset + $1))" > "$GH_DIR/clock-offset"
+}
+
 # The sandbox host's tools: a gh whose credential store is a plain file, and
 # which fails to store while <account>/../gh-fail exists.
 HOST_BIN="$TMP_ROOT/host-bin"
@@ -67,6 +86,11 @@ home=$(printf '%s' "$5" | base64 --decode)
 args=()
 while IFS= read -r -d '' arg; do args+=("$arg"); done < <(printf '%s' "$6" | base64 --decode)
 printf '%s %s\n' "$host" "${args[*]}" >> "$FM_FAKE_SSH_LOG"
+if [ -f "$FM_FAKE_GITHUB_DIR/delivery-elapsed" ]; then
+  offset=$(cat "$FM_FAKE_GITHUB_DIR/clock-offset" 2>/dev/null || echo 0)
+  elapsed=$(cat "$FM_FAKE_GITHUB_DIR/delivery-elapsed")
+  echo "$((offset + elapsed))" > "$FM_FAKE_GITHUB_DIR/clock-offset"
+fi
 if [ "${FM_FAKE_SSH_MODE:-normal}" = unreachable ]; then
   cat > /dev/null
   exit 255
@@ -432,7 +456,7 @@ test_record_revoke_validates_the_host_report() {
   run_broker github record-revoke --task t-host --fp 0123456789AB --result revoked
   assert_contains "$ERR" "--fp <12 hex digits>" "a malformed fingerprint is refused"
   run_broker github record-revoke --task t-host --fp 0123456789ab --result deleted
-  assert_contains "$ERR" "--result revoked, invalid, or failed" "an unknown result is refused"
+  assert_contains "$ERR" "--result revoked, invalid, expired, or failed" "an unknown result is refused"
   run_broker github record-revoke --task 'a b' --fp 0123456789ab --result revoked
   assert_contains "$ERR" "record-revoke needs --task <id>" "an unsafe task id is refused"
   assert_equals 1 "$(grep -c . "$LEDGER")" "refused reports record nothing"
@@ -572,16 +596,16 @@ test_refresh_failure_wakes_once_and_retries() {
   refresh_due
   assert_equals 2 "$(posts)" "a failed refresh waits before retrying"
   assert_equals "" "$OUT" "the wait is silent"
-  sleep 1
-  refresh_due FM_CRED_REFRESH_RETRY_SECS=1
+  advance_clock 301
+  refresh_due
   assert_equals 3 "$(posts)" "the refresh retries after its wait"
   assert_equals "" "$OUT" "a repeat failure for the same token is silent"
   assert_equals "cred-refresh-t-fail-$fp1" "$(queued_keys)" "a repeat failure queues no second wake"
   assert_contains "$(tail -n 1 "$LEDGER")" "result=failed reason=refused alerted=no" "the repeat is recorded without an alert"
 
   rm -f "$HOST_DIR/gh-fail"
-  sleep 1
-  refresh_due FM_CRED_REFRESH_RETRY_SECS=1
+  advance_clock 301
+  refresh_due
   assert_equals "" "$OUT" "the recovered refresh is silent"
   assert_contains "$(tail -n 1 "$LEDGER")" "result=delivered" "the retry delivers the token"
   minted_token 4 "$CASE/recovered.token"
@@ -608,11 +632,71 @@ test_unknown_delivery_keeps_the_token() {
 
   printf 'bad route\n' >> "$HOME_DIR/state/t-lost.meta"
   printf 'placement=sandbox\n' >> "$HOME_DIR/state/t-lost.meta"
-  sleep 1
-  refresh_due FM_CRED_REFRESH_RETRY_SECS=1
+  advance_clock 301
+  refresh_due
   assert_equals 2 "$(posts)" "a record that no longer resolves to a sandbox route is never refreshed"
   assert_no_token_anywhere "an unknown delivery"
   pass "an unconfirmed delivery keeps its token, wakes once, and an unresolvable record is skipped"
+}
+
+test_failed_revoke_still_refreshes() {
+  new_case failed-revoke-refresh
+  sandbox_task t-revoke
+  launch_mint t-revoke write 600
+  mv "$FAKEBIN/curl" "$FAKEBIN/curl-api"
+  printf '#!/usr/bin/env bash\nexit 7\n' > "$FAKEBIN/curl"
+  chmod +x "$FAKEBIN/curl"
+  run_broker github revoke --token-file "$CASE/out/t-revoke.launch"
+  [ "$RC" -ne 0 ] || fail "the revoke should fail"
+  mv "$FAKEBIN/curl-api" "$FAKEBIN/curl"
+  refresh_due
+  assert_equals 2 "$(posts)" "a failed revoke leaves the running task eligible for refresh"
+  assert_contains "$(tail -n 1 "$LEDGER")" 'result=delivered' "the live token is refreshed"
+}
+
+test_refresh_budget_and_expiry_order() {
+  new_case refresh-budget
+  sandbox_task a-later
+  launch_mint a-later write 800
+  sandbox_task z-sooner
+  launch_mint z-sooner write 200
+  printf '80\n' > "$GH_DIR/delivery-elapsed"
+  refresh_due FM_FAKE_SSH_MODE=unreachable
+  assert_equals 3 "$(posts)" "the pass stops before another bounded attempt would exceed its budget"
+  assert_contains "$(cat "$CASE/ssh.log")" 'cred-refresh z-sooner' "soonest expiry runs first"
+  refresh_due FM_FAKE_SSH_MODE=unreachable
+  assert_equals 4 "$(posts)" "the next pass reaches the remaining task during the earlier task's retry wait"
+  assert_contains "$(tail -n 1 "$CASE/ssh.log")" 'cred-refresh a-later' "later tasks make progress"
+}
+
+test_interrupted_refresh_is_reported_once() {
+  local pid rc fp
+  new_case interrupted
+  sandbox_task t-interrupted
+  launch_mint t-interrupted write 600
+  fp=$(fp_of "$CASE/out/t-interrupted.launch")
+  mv "$FAKEBIN/curl" "$FAKEBIN/curl-api"
+  cat > "$FAKEBIN/curl" <<'SH'
+#!/usr/bin/env bash
+while [ ! -s "$FM_FAKE_GITHUB_DIR/broker-pid" ]; do sleep 0.01; done
+kill -TERM "$(cat "$FM_FAKE_GITHUB_DIR/broker-pid")"
+exit 7
+SH
+  chmod +x "$FAKEBIN/curl"
+  env -u FM_STATE_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_DATA_OVERRIDE -u FM_ROOT_OVERRIDE \
+    FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" TMPDIR="$CASE/tmp" \
+    "$BROKER" github refresh-due > "$CASE/interrupted.out" 2> "$CASE/interrupted.err" &
+  pid=$!
+  echo "$pid" > "$GH_DIR/broker-pid"
+  wait "$pid"; rc=$?
+  mv "$FAKEBIN/curl-api" "$FAKEBIN/curl"
+  [ "$rc" -ne 0 ] || fail "interrupted broker reported success"
+  assert_contains "$(tail -n 1 "$LEDGER")" 'reason=interrupted alerted=yes' "interruption is recorded and reported"
+  assert_equals "cred-refresh-t-interrupted-$fp" "$(queued_keys)" "interruption queues one wake"
+  assert_absent "$HOME_DIR/state/.control-t-interrupted.lock" "interruption releases the control lock"
+  refresh_due
+  assert_equals 1 "$(posts)" "an interrupted attempt observes the retry delay"
+  assert_equals '' "$OUT" "the next pass does not repeat the wake"
 }
 
 test_mint_writes_a_private_token_and_a_valueless_ledger_line
@@ -625,4 +709,7 @@ test_refresh_due_replaces_an_expiring_token_on_its_host
 test_refresh_skips_fresh_locked_retired_and_unminted_tasks
 test_refresh_failure_wakes_once_and_retries
 test_unknown_delivery_keeps_the_token
+test_failed_revoke_still_refreshes
+test_refresh_budget_and_expiry_order
+test_interrupted_refresh_is_reported_once
 echo "ALL TESTS PASSED"

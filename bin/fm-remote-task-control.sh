@@ -171,9 +171,12 @@
 # stored GitHub App installation token (a ghs_ token) is revoked with
 # `gh api --method DELETE /installation/token`, and any other token is left
 # alone. For a token it tried, retire then prints gh_token_revoke=revoked,
-# invalid (GitHub already refused it), or failed, with gh_token_fp; it journals
-# the result either way and keeps it in state/<id>.gh-token-revoke. Only a
-# passing teardown writes state/<id>.retired, so a retry after SSH exit 255
+# invalid (GitHub already refused it), expired, or failed, with gh_token_fp;
+# it journals the result and keeps it in state/<id>.gh-token-revoke. stdin may
+# carry the supervisor credential ledger: only a mint matching this task and
+# stored fingerprint supplies expiry evidence. A failed revoke stays retryable
+# until confirmed or expired. state/<id>.teardown-passed preserves the passing
+# teardown across retries; only closure writes state/<id>.retired, so SSH exit 255
 # (unknown completion) prints already-retired and the recorded revoke result.
 set -eu
 
@@ -1079,21 +1082,41 @@ cmd_cred_refresh() {
 # After a passing teardown, revoke a stored GitHub App installation token and
 # report the result; any other stored token is left alone.
 retire_revoke_gh_token() { # <id>
-  local id=$1 gh dir result=none fp='' code
+  local id=$1 gh dir result=failed fp='' code expires epoch
   if gh=$(command -v gh 2>/dev/null) && dir=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/fm-task-revoke.XXXXXX"); then
     # The stored token is read into this private directory only; the
     # environment's tokens are cleared so gh reads and presents the stored one.
-    if env -u GH_TOKEN -u GITHUB_TOKEN "$gh" auth token --hostname github.com > "$dir/token" 2>/dev/null \
-      && [ "$(head -c 4 "$dir/token")" = ghs_ ]; then
+    if env -u GH_TOKEN -u GITHUB_TOKEN "$gh" auth token --hostname github.com > "$dir/token" 2>/dev/null; then
+      if [ "$(head -c 4 "$dir/token")" != ghs_ ]; then
+        rm -rf -- "$dir"
+        return 0
+      fi
       LC_ALL=C tr -d '\n' < "$dir/token" > "$dir/bare"
       fp=$(sha256_file "$dir/bare" | cut -c1-12)
+      expires=$(awk -v fp="$fp" -v task="$id" '
+        $2 == "mint" && $3 == "github" {
+          f = t = e = ""
+          for (i = 4; i <= NF; i++) {
+            if ($i ~ /^fp=/) f = substr($i, 4)
+            if ($i ~ /^task=/) t = substr($i, 6)
+            if ($i ~ /^expires=/) e = substr($i, 9)
+          }
+          if (f == fp && t == task) expires = e
+        }
+        END { print expires }')
       code=$(env -u GH_TOKEN -u GITHUB_TOKEN "$gh" api --method DELETE /installation/token --include 2>/dev/null \
-        | awk 'NR == 1 { print $2; exit }') || code=
+        | awk 'NR == 1 { print $2 }') || true
       case "$code" in
-        204) result=revoked ;;
-        401) result=invalid ;;
+        2[0-9][0-9]) result=revoked ;;
+        401|404) result=invalid ;;
         *) result=failed ;;
       esac
+      if [ "$result" = failed ] && [ -n "$expires" ] \
+        && epoch=$(fm_utc_iso_to_epoch "$expires") && [ "$epoch" -le "$(date +%s)" ]; then
+        result=expired
+      fi
+    elif ! grep -q 'credential .*gh_token=' "$TARGET_HOME/state/task-provision.journal"; then
+      result=none
     fi
     rm -rf -- "$dir"
   fi
@@ -1101,17 +1124,19 @@ retire_revoke_gh_token() { # <id>
   printf '%s %s\n' "$result" "${fp:--}" > "$TARGET_HOME/state/$id.gh-token-revoke" \
     || printf 'warning: task %s GitHub token revoke result could not be recorded\n' "$id" >&2
   retire_report_revoke "$result" "$fp"
+  [ "$result" != failed ]
 }
 
 retire_report_revoke() { # <result> <fp|->
-  case "$1" in revoked|invalid|failed) ;; *) return 0 ;; esac
+  case "$1" in revoked|invalid|expired|failed) ;; *) return 0 ;; esac
   [[ "${2:-}" =~ ^[0-9a-f]{12}$ ]] || return 0
   printf 'gh_token_revoke=%s\n' "$1"
   printf 'gh_token_fp=%s\n' "$2"
 }
 
 cmd_retire() {
-  local id=$1 force=${2:-} retired kind result fp
+  local id=$1 force=${2:-} retired kind result fp expiry_records
+  expiry_records=$(cat)
   [ -z "$force" ] || [ "$force" = --force ] || usage
   kind=$(marker_field kind)
   [ "$kind" = ship ] \
@@ -1125,13 +1150,15 @@ cmd_retire() {
     return 0
   fi
 
-  # The task home has no supervisor, so the teardown's watcher guard is moot.
-  if [ -n "$force" ]; then
-    FM_TEARDOWN_GUARD_DONE=1 run_host fm-teardown.sh "$id" --force
-  else
-    FM_TEARDOWN_GUARD_DONE=1 run_host fm-teardown.sh "$id"
+  if [ ! -f "$TARGET_HOME/state/$id.teardown-passed" ]; then
+    if [ -n "$force" ]; then
+      FM_TEARDOWN_GUARD_DONE=1 run_host fm-teardown.sh "$id" --force < /dev/null
+    else
+      FM_TEARDOWN_GUARD_DONE=1 run_host fm-teardown.sh "$id" < /dev/null
+    fi
+    date +%s > "$TARGET_HOME/state/$id.teardown-passed"
   fi
-  retire_revoke_gh_token "$id"
+  retire_revoke_gh_token "$id" <<< "$expiry_records" || die "GitHub token revocation is unconfirmed; retirement remains retryable"
   if ! date +%s > "$retired.new" || ! mv -f -- "$retired.new" "$retired"; then
     rm -f -- "$retired.new"
     printf 'warning: task %s retired, but its retirement record could not be written; a retry will reach teardown again\n' "$id" >&2

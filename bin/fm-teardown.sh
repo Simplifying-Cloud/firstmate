@@ -3519,13 +3519,13 @@ sandbox_record_host_revoke() { # <host-output>
   local result fp
   result=$(printf '%s\n' "$1" | sed -n 's/^gh_token_revoke=//p' | tail -n 1)
   fp=$(printf '%s\n' "$1" | sed -n 's/^gh_token_fp=//p' | tail -n 1)
-  case "$result" in revoked|invalid|failed) ;; *) return 0 ;; esac
+  case "$result" in revoked|invalid|expired|failed) ;; *) return 0 ;; esac
   [[ "$fp" =~ ^[0-9a-f]{12}$ ]] || return 0
   FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CONFIG_OVERRIDE="$CONFIG" \
     "$SCRIPT_DIR/fm-cred-broker.sh" github record-revoke --task "$ID" --fp "$fp" --result "$result" \
     || echo "warning: sandbox task $ID's GitHub token revoke ($result) could not be recorded in its credential ledger" >&2
   if [ "$result" = failed ]; then
-    echo "warning: sandbox task $ID's host could not revoke its GitHub App token, which stays valid until it expires (within an hour of its last refresh); its sandbox is destroyed now" >&2
+    echo "warning: sandbox task $ID's host could not confirm token revocation; retirement remains retryable" >&2
   fi
 }
 
@@ -3596,8 +3596,9 @@ sandbox_task_teardown() {
     exit 1
   fi
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ]; then
-    out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
-      "$SCRIPT_DIR/fm-on.sh" "$ID" "$FM_REMOTE_ROUTE_CONTROL" retire "$ID" < /dev/null 2>&1) || rc=$?
+    out=$( { cat "$STATE/cred-ledger" 2>/dev/null || true; } | FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+      "$SCRIPT_DIR/fm-on.sh" --stdin "$ID" "$FM_REMOTE_ROUTE_CONTROL" retire "$ID" 2>&1) || rc=$?
+    sandbox_record_host_revoke "$out"
     if [ "$rc" -eq 255 ]; then
       sandbox_relay_host_text "$out"
       echo "error: sandbox task $ID's retirement on $FM_REMOTE_ROUTE_HOST has unknown completion (SSH exit 255); its sandbox $name, hold label, task record, and backlog item are preserved - rerun teardown once the host is reachable" >&2
@@ -3609,7 +3610,6 @@ sandbox_task_teardown() {
         || echo "error: sandbox task $ID's status mirror could not be re-armed ($SANDBOX_MIRROR_ERROR); rerun bin/fm-procevent-remote-reply.sh arm $ID" >&2
       exit "$rc"
     fi
-    sandbox_record_host_revoke "$out"
   fi
 
   # Pass. The destroy-pending record comes first, so no later failure can leave

@@ -76,8 +76,9 @@ A GitHub credential whose source is `app` is a GitHub App installation token ins
 The App's private key never leaves this home; [the configuration reference](configuration.md#github-app-configgithub-app) owns `config/github-app` and the App's permissions.
 
 - While the task runs, the watcher refreshes the token about 15 minutes before it expires, pushing a fresh one to the host's `cred-refresh` verb, which stores it the way provisioning did.
-- A failed refresh is retried every few minutes and queues one `check: sandbox <id> credential refresh failed` wake per token, before that token expires; the [broker's header](../bin/fm-cred-broker.sh) owns the cadence and its settings.
-- A ship's host revokes its token once its retirement passes, and a token minted for a spawn that never launched is revoked before the spawn exits.
+- A failed refresh is retried every few minutes and queues one `check: sandbox <id> credential refresh failed` wake per token, before that token expires; the [broker's header](../bin/fm-cred-broker.sh) owns the fixed cadence and bounds.
+- A ship's retirement remains retryable until its host confirms revocation or the matching ledger expiry has passed; the recorded result distinguishes revocation from expiry.
+A token minted for a spawn that never launched is revoked before the spawn exits.
 - A scout's token, and a ship's under `--force`, are not revoked on the host: they end with the sandbox's destruction and their own expiry.
 - Every mint, refresh, and revoke is recorded in this home's `state/cred-ledger` with its repository, access, expiry, and a fingerprint, never the token.
 

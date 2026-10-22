@@ -2977,7 +2977,7 @@ launch_template() {
   # same posture for any non-interactive path. OPENCODE_DISABLE_AUTOUPDATE
   # keeps a background self-upgrade from exiting the worker mid-task, which 1.x
   # was known to do.
-  opencode2) printf '%s' 'OPENCODE_CONFIG_DIR=__OC2CFGDIR__ OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__OC2POLICIES____OC2MODEL__}'\'' __OC2BIN__ --standalone --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  opencode2) printf '%s' 'OPENCODE_CONFIG_DIR=__OC2CFGDIR__ OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__OC2POLICIES____OC2MODEL__}'\'' __OC2BIN__ --standalone --auto --session __OC2SESSION__ --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIRESUME__ --approve'
     if [ "$kind" = secondmate ]; then
@@ -5397,6 +5397,22 @@ EOF
   opencode*)
     mkdir -p "$WT/.opencode/plugins"
     if [ "$HARNESS" = opencode2 ]; then
+      OC2_SESSION_ID_FILE="$STATE_REAL/$ID.opencode-session-id"
+      if [ -s "$OC2_SESSION_ID_FILE" ]; then
+        OC2_SESSION_ID=$(cat "$OC2_SESSION_ID_FILE")
+      else
+        oc2_session_suffix=$(LC_ALL=C od -An -v -tx1 -N 13 /dev/urandom 2>/dev/null | tr -d ' \n') || exit 1
+        [ "${#oc2_session_suffix}" -eq 26 ] || {
+          echo "error: could not mint the OpenCode 2.x session id for $ID" >&2
+          exit 1
+        }
+        OC2_SESSION_ID="ses_$oc2_session_suffix"
+        (set -C; printf '%s\n' "$OC2_SESSION_ID" >"$OC2_SESSION_ID_FILE") 2>/dev/null || OC2_SESSION_ID=$(cat "$OC2_SESSION_ID_FILE")
+      fi
+      [[ "$OC2_SESSION_ID" =~ ^ses_[a-f0-9]{26}$ ]] || {
+        echo "error: invalid persisted OpenCode 2.x session id for $ID" >&2
+        exit 1
+      }
       cat >"$WT/.opencode/plugins/fm-busy-state.js" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
@@ -5408,12 +5424,14 @@ EOF
 // a detached loop that the returned cleanup aborts. Semantic state comes from
 // the session.execution events: started is active, and succeeded, failed, and
 // interrupted (including a manual double-Escape cancel) all close a turn, so an
-// abnormal end can never leave a stale busy record. Scoping latches the first
-// session that starts an execution (the
-// worker's main session - a subagent child session can only start while the
-// main session is already busy) and ignores other sessions' events until the
-// latched session settles, so a child's completion can never clear the
-// worker's busy state. The latched settle touch stays the watcher's wake
+// abnormal end can never leave a stale busy record. The execution events carry
+// no location on the bus, and one server can host sessions from many
+// directories - every location plugin loaded in the shared background server
+// receives every session's execution events - so this plugin accepts only the
+// Firstmate-minted session id passed to the worker at launch. Without that
+// identity gate a foreign settle in a shared server would busy and settle THIS
+// task from a stranger's session, touching its turn-ended notification mid-turn (verified
+// live, opencode 2.0.32). The settle touch stays the watcher's wake
 // NOTIFICATION, never current-state truth, and rides the same gen-guarded
 // writer call (fm-busy-event.sh --touch-turnend): teardown retires the busy
 // contract before removing the notification, so a final settle racing
@@ -5432,21 +5450,18 @@ const busyEvent = (state, event, touchTurnend) =>
 export default {
   id: "fm-busy-state",
   setup: async (ctx) => {
-    let activeSession = null;
+    const workerSessionID = "$OC2_SESSION_ID";
     const stop = new AbortController();
     (async () => {
       try {
         for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
           const data = event.data || {};
           const sessionID = data.sessionID;
+          if (sessionID !== workerSessionID) continue;
           if (event.type === "session.execution.started") {
-            if (activeSession === null) activeSession = sessionID;
-            if (sessionID === activeSession) await busyEvent("busy", "execution-started");
+            await busyEvent("busy", "execution-started");
           } else if (event.type === "session.execution.succeeded" || event.type === "session.execution.failed" || event.type === "session.execution.interrupted") {
-            if (sessionID === activeSession) {
-              activeSession = null;
-              await busyEvent("idle", "execution-" + event.type.split(".").pop(), true);
-            }
+            await busyEvent("idle", "execution-" + event.type.split(".").pop(), true);
           }
         }
       } catch {
@@ -6013,6 +6028,7 @@ opencode2)
   fm_opencode2_isolate_config_dir "$OC2_CFG_DIR" || exit 1
   LAUNCH=${LAUNCH//__OC2BIN__/"$(shell_quote "$OC2_BIN")"}
   LAUNCH=${LAUNCH//__OC2CFGDIR__/"$(shell_quote "$OC2_CFG_DIR")"}
+  LAUNCH=${LAUNCH//__OC2SESSION__/"$(shell_quote "$OC2_SESSION_ID")"}
   LAUNCH=${LAUNCH//__OC2POLICIES__/$OC2_POLICIES}
   LAUNCH=${LAUNCH//__OC2MODEL__/${OC2_MODEL:-}}
   ;;

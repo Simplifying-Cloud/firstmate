@@ -42,16 +42,34 @@ mkdir -p "$LAB"
 cleanup() {
   tmux -L "$SOCKET" kill-server 2>/dev/null || true
   [ -z "${MOCK_PID:-}" ] || kill -TERM "$MOCK_PID" 2>/dev/null || true
+  # The shared-server section's stand-in background server belongs to this test
+  # (isolated HOME, XDG dirs, and port). Stop it through its own env, then kill
+  # exactly the processes carrying this run's mark, the same /proc discipline
+  # the isolation guard uses, so no test process survives a failed step.
+  if [ -n "${SG:-}" ]; then
+    env HOME="$LAB/user-home" XDG_CONFIG_HOME="$SG/xdg/config" XDG_DATA_HOME="$SG/xdg/data" \
+      XDG_STATE_HOME="$SG/xdg/state" XDG_CACHE_HOME="$SG/xdg/cache" \
+      "$OC2_BIN" service stop >/dev/null 2>&1 || true
+  fi
+  if [ -n "${SHARED_MARK:-}" ]; then
+    for env_file in /proc/[0-9]*/environ; do
+      pid=${env_file#/proc/}
+      pid=${pid%/environ}
+      tr '\0' '\n' <"$env_file" 2>/dev/null | grep -Fqx "FM_OC2_SHARED_MARK=$SHARED_MARK" || continue
+      kill -TERM "$pid" 2>/dev/null || true
+    done
+  fi
   fm_test_cleanup
 }
 trap cleanup EXIT
 
 # --- localhost Anthropic-compatible mock: one short streamed turn ------------
 MOCK_PORT=$((20000 + RANDOM % 20000))
-python3 - "$MOCK_PORT" >"$LAB/mock.log" 2>&1 <<'PYEOF' &
+python3 - "$MOCK_PORT" "$LAB/shared-a-requested" >"$LAB/mock.log" 2>&1 <<'PYEOF' &
 import json, socketserver, sys, time
 
 port = int(sys.argv[1])
+shared_a_requested = sys.argv[2]
 sse = b"".join(
     b"event: " + ev.encode() + b"\ndata: " + json.dumps(p).encode() + b"\n\n"
     for ev, p in [
@@ -68,8 +86,13 @@ sse = b"".join(
 class H(socketserver.BaseRequestHandler):
     def handle(self):
         data = self.request.recv(65536)
-        # Hold the turn open long enough for the busy poll to observe it.
-        time.sleep(6)
+        if b"exactly A" in data:
+            open(shared_a_requested, "a").close()
+            time.sleep(20)
+        elif b"exactly B" in data:
+            time.sleep(45)
+        else:
+            time.sleep(6)
         self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" + sse)
 
 class Srv(socketserver.ThreadingTCPServer):
@@ -140,6 +163,7 @@ HOME="$LAB/user-home" FM_ROOT_OVERRIDE='' FM_HOME="$home" \
 plugin="$wt/.opencode/plugins/fm-busy-state.js"
 [ -f "$plugin" ] || fail "fixture spawn wrote no busy-state plugin"
 gen=$(cat "$home/state/$id.busy-gen")
+live_session_id=$(cat "$home/state/$id.opencode-session-id")
 turnend="$home/state/$id.turn-ended"
 rm -f "$turnend"
 
@@ -147,7 +171,7 @@ rm -f "$turnend"
 cfgdir="$home/state/$id.opencode-config"
 cfg='{"permission":{"*":"allow"},"model":"mockz/mock-1","providers":{"mockz":{"name":"Mock Z","package":"@opencode/ai/providers/anthropic-compatible","settings":{"baseURL":"http://127.0.0.1:'"$MOCK_PORT"'","apiKey":"mock"},"models":{"mock-1":{"name":"Mock 1","capabilities":{"tools":true},"limit":{"context":100000,"output":4096}}}}},"policies":[{"action":"provider.use","resource":"*","effect":"deny"},{"action":"provider.use","resource":"mockz","effect":"allow"}]}'
 tmux -L "$SOCKET" new-session -d -s "$SESSION" -x 100 -y 30 -c "$wt" \
-  "env OPENCODE_CONFIG_DIR='$cfgdir' OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='$cfg' '$OC2_BIN' --standalone --auto --prompt 'Reply with exactly OK.'; rc=\$?; printf 'OC2_EXIT=%s\\n' \"\$rc\"; sleep 300"
+  "env OPENCODE_CONFIG_DIR='$cfgdir' OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='$cfg' '$OC2_BIN' --standalone --auto --session '$live_session_id' --prompt 'Reply with exactly OK.'; rc=\$?; printf 'OC2_EXIT=%s\\n' \"\$rc\"; sleep 300"
 
 capture() { tmux -L "$SOCKET" capture-pane -p -t "$SESSION" 2>/dev/null || true; }
 
@@ -209,3 +233,221 @@ tmux -L "$SOCKET" send-keys -t "$SESSION" Enter
 wait_for "OC2_EXIT=0" 60 || fail "/exit did not leave the real 2.x TUI"
 
 printf 'ok - opencode2 %s live: standalone TUI turn drove the generated plugin busy->idle with the notification touch, and /exit left the pane\n' "$OC2_VERSION"
+
+# --- two workers on one shared background server ------------------------------
+# The 2026-10-19 cross-task defect: session.execution events carry no location
+# on the bus, and every location plugin loaded in the per-user background
+# server receives every session's execution events, so one worker's settle
+# latched ANOTHER task's plugin from a stranger's session and touched that
+# task's turn-ended notification mid-turn - for every loaded opencode2 task at
+# once. The entry path is a bare `opencode` command that overrides the launch's
+# per-task config dir (a worker's own tool call), loading the worktree's plugin
+# into the shared server, which outlives the task. Two fixture workers attach
+# to one stand-in per-user background server; the victim task's records must
+# survive the foreign settle byte-for-byte while the same plugin still serves
+# its own worktree's next session in the same server.
+# The managed service port is machine-global (a real instance can hold the
+# default 49374 at any moment, including another lane's), so the stand-in gets
+# its own port and never depends on or disturbs it.
+SG="$LAB/shared"
+SHARED_PORT=$((20000 + RANDOM % 20000))
+# Every process this section starts carries the mark, so cleanup can stop
+# exactly those and nothing that belongs to anyone else (the sibling isolation
+# guard owns the /proc pattern).
+SHARED_MARK="fm-oc2-shared-$$-$RANDOM"
+mkdir -p "$SG/xdg/config" "$SG/xdg/data" "$SG/xdg/state" "$SG/xdg/cache" "$SG/cfg"
+env HOME="$LAB/user-home" FM_OC2_SHARED_MARK="$SHARED_MARK" \
+  XDG_CONFIG_HOME="$SG/xdg/config" XDG_DATA_HOME="$SG/xdg/data" \
+  XDG_STATE_HOME="$SG/xdg/state" XDG_CACHE_HOME="$SG/xdg/cache" \
+  OPENCODE_CONFIG_DIR="$SG/cfg" OPENCODE_DISABLE_AUTOUPDATE=1 \
+  "$OC2_BIN" service set port "$SHARED_PORT" >/dev/null 2>&1 \
+  || fail "could not give the stand-in background server its own port"
+
+idA=oc2-shared-a
+idB=oc2-shared-b
+mkdir -p "$home/data/$idA" "$home/data/$idB"
+for id in "$idA" "$idB"; do
+  cat >"$home/data/$id/brief.md" <<'EOF'
+# Task
+## Captain's intent
+Arm the OpenCode 2.x busy wiring.
+
+## Firstmate spec
+Fixture brief for shared-server confinement verification.
+EOF
+done
+projA="$LAB/project-a"
+projB="$LAB/project-b"
+fm_git_worktree "$projA" "$LAB/wtA" wt-oc2-shared-a
+fm_git_worktree "$projB" "$LAB/wtB" wt-oc2-shared-b
+for pair in "$idA:$LAB/wtA:$projA" "$idB:$LAB/wtB:$projB"; do
+  id=${pair%%:*}
+  rest=${pair#*:}
+  wtshared=${rest%%:*}
+  projshared=${rest#*:}
+  HOME="$LAB/user-home" FM_ROOT_OVERRIDE='' FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+    FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wtshared" TMUX="fake,1,0" \
+    FM_FAKE_OC2_DEBUG_CONFIG="$LAB/debug-config.json" \
+    PATH="$fakebin:$BASE_PATH" \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$projshared" --mode local-only --yolo off --harness opencode2 \
+    >>"$LAB/shared-spawn.log" 2>&1 \
+    || fail "fixture spawn failed for $id: $(cat "$LAB/shared-spawn.log")"
+done
+
+oc2_shared_run() {  # <worktree> <task-id>
+  (
+      cd "$1" &&
+      shared_session_id=$(cat "$home/state/$2.opencode-session-id") &&
+      if [ "$2" = "$idA" ]; then shared_prompt='Reply with exactly A.'; else shared_prompt='Reply with exactly B.'; fi &&
+      env HOME="$LAB/user-home" FM_OC2_SHARED_MARK="$SHARED_MARK" \
+        XDG_CONFIG_HOME="$SG/xdg/config" XDG_DATA_HOME="$SG/xdg/data" \
+        XDG_STATE_HOME="$SG/xdg/state" XDG_CACHE_HOME="$SG/xdg/cache" \
+        OPENCODE_CONFIG_DIR="$SG/cfg" OPENCODE_DISABLE_AUTOUPDATE=1 \
+        OPENCODE_CONFIG_CONTENT="$cfg" \
+        timeout 120 "$OC2_BIN" run --session "$shared_session_id" "$shared_prompt" </dev/null \
+        >"$LAB/shared-run-$(basename "$1").log" 2>&1
+  )
+}
+
+oc2_competing_session_run() {  # <worktree> <session-id>
+  (
+      cd "$1" &&
+      env HOME="$LAB/user-home" FM_OC2_SHARED_MARK="$SHARED_MARK" \
+        XDG_CONFIG_HOME="$SG/xdg/config" XDG_DATA_HOME="$SG/xdg/data" \
+        XDG_STATE_HOME="$SG/xdg/state" XDG_CACHE_HOME="$SG/xdg/cache" \
+        OPENCODE_CONFIG_DIR="$SG/cfg" OPENCODE_DISABLE_AUTOUPDATE=1 \
+        OPENCODE_CONFIG_CONTENT="$cfg" \
+        timeout 120 "$OC2_BIN" run --session "$2" 'Reply with exactly competitor.' </dev/null \
+        >"$LAB/shared-run-competitor.log" 2>&1
+  )
+}
+
+wait_shared_idle() {  # <id>
+  local i=0 current
+  while [ "$i" -lt 120 ]; do
+    current=$(fm_busy_classify tmux "fake:w" opencode2 "$1" "$home/state")
+    [ "$current" = "idle opencode-plugin" ] && return 0
+    sleep 0.5
+    i=$((i + 1))
+  done
+  fm_busy_classify tmux "fake:w" opencode2 "$1" "$home/state" >&2
+  cat "$home/state/$1.busy-state" >&2 2>/dev/null || true
+  return 1
+}
+
+# Keep both turns active on the shared server at once. The delayed provider
+# response leaves enough time to observe both busy records before either turn
+# can settle, then A's settle must leave B's active records untouched.
+oc2_shared_run "$LAB/wtA" "$idA" & runA=$!
+wait_shared_busy() {  # <id>
+  local i=0 current
+  while [ "$i" -lt 120 ]; do
+    current=$(fm_busy_classify tmux "fake:w" opencode2 "$1" "$home/state")
+    [ "$current" = "busy opencode-plugin" ] && return 0
+    sleep 0.25
+    i=$((i + 1))
+  done
+  cat "$home/state/$1.busy-state" >&2 2>/dev/null || true
+  return 1
+}
+wait_shared_busy "$idA" || fail "worker A never entered its shared-server turn"
+for ((attempt = 0; attempt < 120; attempt++)); do
+  [ -f "$LAB/shared-a-requested" ] && break
+  sleep 0.25
+done
+[ -f "$LAB/shared-a-requested" ] || fail "worker A never reached the shared mock provider"
+# A separate OpenCode session in the same worktree must not be mistaken for
+# the worker's pinned launch session. Keep A's provider response delayed while
+# the competing session runs, then compare the task records byte-for-byte.
+a_competing_busy=$(cat "$home/state/$idA.busy-state")
+: >"$LAB/a-competing-marker"
+oc2_competing_session_run "$LAB/wtA" "${live_session_id}-competitor" \
+  || fail "same-worktree competing session failed: $(cat "$LAB/shared-run-competitor.log")"
+[ "$(cat "$home/state/$idA.busy-state")" = "$a_competing_busy" ] \
+  || fail "same-worktree competing session rewrote worker A's busy record"
+[ ! -e "$home/state/$idA.turn-ended" ] \
+  || fail "same-worktree competing session touched worker A's active turn-ended notification"
+oc2_shared_run "$LAB/wtB" "$idB" & runB=$!
+wait_shared_busy "$idB" || fail "worker B never overlapped worker A on the shared server"
+[ "$(fm_busy_classify tmux "fake:w" opencode2 "$idA" "$home/state")" = "busy opencode-plugin" ] \
+  || fail "worker A settled before worker B became busy; turns did not overlap"
+b_busy=$(cat "$home/state/$idB.busy-state")
+: >"$LAB/b-marker"
+wait "$runA" || fail "shared-server run A failed: $(cat "$LAB/shared-run-wtA.log")"
+wait_shared_idle "$idA" || fail "worker A never settled on the shared server"
+[ -f "$home/state/$idA.turn-ended" ] || fail "worker A's own settle must touch its notification"
+[ "$home/state/$idA.turn-ended" -nt "$LAB/a-competing-marker" ] \
+  || fail "the pinned worker A session did not touch its notification after the competing session"
+[ "$(cat "$home/state/$idB.busy-state")" = "$b_busy" ] \
+  || fail "worker A's settle rewrote worker B's active busy record: $(cat "$home/state/$idB.busy-state")"
+[ ! -e "$home/state/$idB.turn-ended" ] \
+  || fail "worker A's settle touched worker B's active turn-ended notification"
+
+# B's settle must likewise leave A's settled records untouched.
+a_rec=$(cat "$home/state/$idA.busy-state")
+: >"$LAB/a-marker"
+wait "$runB" || fail "shared-server run B failed: $(cat "$LAB/shared-run-wtB.log")"
+wait_shared_idle "$idB" || fail "worker B never settled on the shared server"
+[ -f "$home/state/$idB.turn-ended" ] || fail "worker B's own settle must touch its notification"
+[ "$(cat "$home/state/$idA.busy-state")" = "$a_rec" ] \
+  || fail "worker B's settle rewrote worker A's busy record: $(cat "$home/state/$idA.busy-state")"
+[ "$home/state/$idA.turn-ended" -nt "$LAB/a-marker" ] \
+  && fail "worker B's settle re-touched worker A's turn-ended notification"
+
+# Non-vacuity: A's plugin must still be alive in that server and reacting to
+# its OWN directory, or the untouched records above would prove nothing. A
+# second session in A's worktree must advance A's busy record through a full
+# cycle - wait for the settle, not the intermediate busy write, because only
+# the accepted settle carries the notification touch.
+oc2_shared_run "$LAB/wtA" "$idA" || fail "shared-server run A2 failed: $(cat "$LAB/shared-run-wtA.log")"
+i=0
+while [ "$i" -lt 120 ]; do
+  cur=$(cat "$home/state/$idA.busy-state" 2>/dev/null)
+  if [ "$cur" != "$a_rec" ] \
+    && [ "$(fm_busy_classify tmux "fake:w" opencode2 "$idA" "$home/state")" = "idle opencode-plugin" ]; then
+    break
+  fi
+  sleep 0.5
+  i=$((i + 1))
+done
+[ "$(cat "$home/state/$idA.busy-state")" != "$a_rec" ] \
+  || fail "worker A's own second session must advance its busy record (plugin looked dead in the shared server): $(cat "$home/state/$idA.busy-state")"
+[ "$(cat "$home/state/$idA.busy-state")" != "$a_rec" ] \
+  && [ "$(fm_busy_classify tmux "fake:w" opencode2 "$idA" "$home/state")" = "idle opencode-plugin" ] \
+  || fail "worker A's own second session never settled: $(cat "$home/state/$idA.busy-state")"
+[ "$home/state/$idA.turn-ended" -nt "$LAB/a-marker" ] \
+  || fail "worker A's own second session must re-touch its notification"
+
+# The stand-in server must have been really shared by the two worktrees, not
+# two private servers: exactly one managed-service process carries this run's
+# mark after all three runs.
+shared_instances=0
+for env_file in /proc/[0-9]*/environ; do
+  pid=${env_file#/proc/}
+  pid=${pid%/environ}
+  tr '\0' '\n' <"$env_file" 2>/dev/null | grep -Fqx "FM_OC2_SHARED_MARK=$SHARED_MARK" || continue
+  shared_instances=$((shared_instances + 1))
+done
+[ "$shared_instances" -eq 1 ] \
+  || fail "expected one stand-in service process after the runs, saw $shared_instances (posture not shared)"
+
+# Stop the stand-in here rather than only in the EXIT trap, and prove it went
+# down, so a failed later step can never orphan a test service on a live port.
+env HOME="$LAB/user-home" XDG_CONFIG_HOME="$SG/xdg/config" XDG_DATA_HOME="$SG/xdg/data" \
+  XDG_STATE_HOME="$SG/xdg/state" XDG_CACHE_HOME="$SG/xdg/cache" \
+  "$OC2_BIN" service stop >/dev/null 2>&1 \
+  || fail "could not stop the stand-in background server"
+sleep 1
+shared_instances=0
+for env_file in /proc/[0-9]*/environ; do
+  pid=${env_file#/proc/}
+  pid=${pid%/environ}
+  tr '\0' '\n' <"$env_file" 2>/dev/null | grep -Fqx "FM_OC2_SHARED_MARK=$SHARED_MARK" || continue
+  shared_instances=$((shared_instances + 1))
+done
+[ "$shared_instances" -eq 0 ] \
+  || fail "the stand-in background server did not stop ($shared_instances marked processes remain)"
+
+printf 'ok - opencode2 %s live: two workers on one shared background server kept each task busy record and turn-ended notification confined to its own worktree\n' "$OC2_VERSION"

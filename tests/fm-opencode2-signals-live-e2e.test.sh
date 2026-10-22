@@ -276,18 +276,22 @@ Arm the OpenCode 2.x busy wiring.
 Fixture brief for shared-server confinement verification.
 EOF
 done
-fm_git_worktree "$proj" "$LAB/wtA" wt-oc2-shared-a
-fm_git_worktree "$proj" "$LAB/wtB" wt-oc2-shared-b
-for pair in "$idA:$LAB/wtA" "$idB:$LAB/wtB"; do
+projA="$LAB/project-a"
+projB="$LAB/project-b"
+fm_git_worktree "$projA" "$LAB/wtA" wt-oc2-shared-a
+fm_git_worktree "$projB" "$LAB/wtB" wt-oc2-shared-b
+for pair in "$idA:$LAB/wtA:$projA" "$idB:$LAB/wtB:$projB"; do
   id=${pair%%:*}
-  wtshared=${pair#*:}
+  rest=${pair#*:}
+  wtshared=${rest%%:*}
+  projshared=${rest#*:}
   HOME="$LAB/user-home" FM_ROOT_OVERRIDE='' FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wtshared" TMUX="fake,1,0" \
     FM_FAKE_OC2_DEBUG_CONFIG="$LAB/debug-config.json" \
     PATH="$fakebin:$BASE_PATH" \
-    "$ROOT/bin/fm-spawn.sh" "$id" "$proj" --mode local-only --yolo off --harness opencode2 \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$projshared" --mode local-only --yolo off --harness opencode2 \
     >>"$LAB/shared-spawn.log" 2>&1 \
     || fail "fixture spawn failed for $id: $(cat "$LAB/shared-spawn.log")"
 done

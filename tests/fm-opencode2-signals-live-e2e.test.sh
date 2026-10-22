@@ -311,6 +311,19 @@ oc2_shared_run() {  # <worktree> <task-id>
   )
 }
 
+oc2_competing_session_run() {  # <worktree> <session-id>
+  (
+      cd "$1" &&
+      env HOME="$LAB/user-home" FM_OC2_SHARED_MARK="$SHARED_MARK" \
+        XDG_CONFIG_HOME="$SG/xdg/config" XDG_DATA_HOME="$SG/xdg/data" \
+        XDG_STATE_HOME="$SG/xdg/state" XDG_CACHE_HOME="$SG/xdg/cache" \
+        OPENCODE_CONFIG_DIR="$SG/cfg" OPENCODE_DISABLE_AUTOUPDATE=1 \
+        OPENCODE_CONFIG_CONTENT="$cfg" \
+        timeout 120 "$OC2_BIN" run --session "$2" 'Reply with exactly competitor.' </dev/null \
+        >"$LAB/shared-run-competitor.log" 2>&1
+  )
+}
+
 wait_shared_idle() {  # <id>
   local i=0 current
   while [ "$i" -lt 120 ]; do
@@ -345,6 +358,17 @@ for ((attempt = 0; attempt < 120; attempt++)); do
   sleep 0.25
 done
 [ -f "$LAB/shared-a-requested" ] || fail "worker A never reached the shared mock provider"
+# A separate OpenCode session in the same worktree must not be mistaken for
+# the worker's pinned launch session. Keep A's provider response delayed while
+# the competing session runs, then compare the task records byte-for-byte.
+a_competing_busy=$(cat "$home/state/$idA.busy-state")
+: >"$LAB/a-competing-marker"
+oc2_competing_session_run "$LAB/wtA" "${live_session_id}-competitor" \
+  || fail "same-worktree competing session failed: $(cat "$LAB/shared-run-competitor.log")"
+[ "$(cat "$home/state/$idA.busy-state")" = "$a_competing_busy" ] \
+  || fail "same-worktree competing session rewrote worker A's busy record"
+[ ! -e "$home/state/$idA.turn-ended" ] \
+  || fail "same-worktree competing session touched worker A's active turn-ended notification"
 oc2_shared_run "$LAB/wtB" "$idB" & runB=$!
 wait_shared_busy "$idB" || fail "worker B never overlapped worker A on the shared server"
 [ "$(fm_busy_classify tmux "fake:w" opencode2 "$idA" "$home/state")" = "busy opencode-plugin" ] \
@@ -354,6 +378,8 @@ b_busy=$(cat "$home/state/$idB.busy-state")
 wait "$runA" || fail "shared-server run A failed: $(cat "$LAB/shared-run-wtA.log")"
 wait_shared_idle "$idA" || fail "worker A never settled on the shared server"
 [ -f "$home/state/$idA.turn-ended" ] || fail "worker A's own settle must touch its notification"
+[ "$home/state/$idA.turn-ended" -nt "$LAB/a-competing-marker" ] \
+  || fail "the pinned worker A session did not touch its notification after the competing session"
 [ "$(cat "$home/state/$idB.busy-state")" = "$b_busy" ] \
   || fail "worker A's settle rewrote worker B's active busy record: $(cat "$home/state/$idB.busy-state")"
 [ ! -e "$home/state/$idB.turn-ended" ] \

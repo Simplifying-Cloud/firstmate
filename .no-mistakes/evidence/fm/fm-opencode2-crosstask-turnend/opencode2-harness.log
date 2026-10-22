@@ -1,0 +1,14 @@
+FM_TEST_BEGIN 2026-10-22T21:52:14Z tests/fm-opencode2-harness.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - opencode2 binary resolution refuses without a proven 2.x executable
+ok - opencode2 launch is standalone, config-isolated, and platform-only
+ok - opencode2 worker gets a per-task OPENCODE_CONFIG_DIR that keeps OpenCode off the operator's shared background server
+ok - opencode2 refuses a model outside the discovered platform providers
+ok - opencode2 refuses secondmate launches
+ok - opencode2 plugin scopes events to the task's pinned session id
+ok - an opencode2 plugin in a shared server ignores foreign-directory sessions
+ok - an opencode2 settle racing teardown cannot resurrect task records
+ok - opencode2 control mechanics match the verified 2.x facts
+FM_TEST_END 2026-10-22T21:52:34Z tests/fm-opencode2-harness.test.sh exit=0 duration_ms=20585 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=20651
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=20585 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-opencode2-harness.test.sh duration_ms=20585

@@ -8,7 +8,7 @@ The operating facts live in [`.agents/skills/harness-adapters/references/harness
 | Field | Value |
 |---|---|
 | Version | `opencode v2.0.32` (`@opencode/cli`), PATH-shadowed by `opencode 1.18.31` (`~/.opencode/bin/opencode`) |
-| Verified | 2026-10-17; config isolation 2026-10-19 |
+| Verified | 2026-10-17; config isolation 2026-10-19; shared-server confinement 2026-10-22 |
 | Platform | Linux x86_64, Herdr 0.9.1 lab session for TUI driving, tmux for the live guard |
 | Binary | `~/.local/bin/opencode` and `~/.local/bin/opencode2` (both symlinked to the same 2.x executable) |
 | Platform origin | `https://ai.simplifying.cloud` (org config from its `/.well-known/opencode` manifest) |
@@ -92,6 +92,15 @@ Facts established live:
 - `session.status` and `session.idle` never appeared in any turn on 2.0.32; the 2.0.32 source ships them only in the event schema, so busy/idle ride the execution events. `session.execution.interrupted` carries `reason:"user"` for a manual cancel, and `session.retry.scheduled` fires while the execution stays open (provider `ConnectionRefused` retries were observed recovering once the mock returned).
 - Driving the real generated plugin through the real fm-spawn and a real TUI turn (the live guard below) recorded `busy opencode-plugin` on execution start and `idle opencode-plugin` with `event=execution-succeeded`, and touched the turn-end notification marker.
 
+### Shared-server event scope (2026-10-22)
+
+Established with probe plugins under `opencode v2.0.32`:
+
+- Two processes with per-task config dirs (service disabled) never see each other's sessions: two `run` clients in separate projects, each with its own `OPENCODE_CONFIG_DIR`, received only their own session's events on their private servers. The shared data directory does not carry sessions across servers.
+- The `session.execution.*` events carry no `location` on the bus, while `session.inbox.enqueued`, `session.instructions.updated`, `session.step.*`, and `session.usage.updated` carry `location.directory` naming the session's directory, and the plugin context exposes `ctx.location`.
+- One per-user background server (`serve --service`) hosts sessions from many directories, and every location plugin loaded in it receives every hosted session's execution events: two `run` clients from two project directories sharing one background server (stand-in operator under isolated XDG dirs) each loaded their project's plugin into that one server process, and each plugin received the other project's `session.execution.started`/`succeeded`. The managed service port is machine-global (the default 49374 belongs to whichever context started first), so the live guard's stand-in gets its own `opencode service set port` value and marks every process it starts for exact cleanup.
+- That is the 2026-10-19 cross-task defect's carrier: a bare `opencode` command that overrides the launch's per-task config dir loads the worktree's plugin into the long-lived shared server, where the pre-gate plugin latched any session that started an execution, so one settle flipped busy records and touched turn-ended notifications for every loaded task within milliseconds - including a task still mid-turn (its record had been flipped busy by the foreign start) and, through the pre-#34 plugin's unguarded direct touch, a task torn down hours earlier. The generated plugin now admits a session only after a location-carrying event names its own worktree, so a shared-server instance stays silent for every foreign session while still serving its own worktree's sessions; the live guard below proves both sides with two workers on one stand-in shared server.
+
 ## Lifecycle
 
 Driven through the Herdr lab pane against the delayed mock:
@@ -110,18 +119,21 @@ FM_OPENCODE2_SIGNALS_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-signals-live-e
 FM_OPENCODE2_ISOLATION_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-isolation-live-e2e.test.sh
 ```
 
-Observed output on 2026-10-19:
+Observed output on 2026-10-22:
 
 ```text
 ok - opencode2 launch is standalone, config-isolated, and platform-only
 ok - opencode2 worker gets a per-task OPENCODE_CONFIG_DIR that keeps OpenCode off the operator's shared background server
 ok - opencode2 refuses a model outside the discovered platform providers
 ok - opencode2 plugin classifies from session.execution events, scoped to the latched worker session
+ok - an opencode2 plugin in a shared server ignores foreign-directory sessions
+ok - an opencode2 settle racing teardown cannot resurrect task records
+ok - opencode2 control mechanics match the verified 2.x facts
 ok - opencode2 opencode v2.0.32 live: standalone TUI turn drove the generated plugin busy->idle with the notification touch, and /exit left the pane
-ok - opencode2 opencode v2.0.32 live: the per-task config dir disables the shared server, so debug config answers privately without the operator global config, and only the launch MCP server registers
+ok - opencode2 opencode v2.0.32 live: two workers on one shared background server kept each task busy record and turn-ended notification confined to its own worktree
 ```
 
-The portable suite pins binary selection, the platform-only launch line, the worker environment's isolated config dir and its service setting (by running the staged launch line against a fake 2.x binary), model refusals, the secondmate refusal, the generated plugin's latch scoping, and the control tables against fake binaries.
+The portable suite pins binary selection, the platform-only launch line, the worker environment's isolated config dir and its service setting (by running the staged launch line against a fake 2.x binary), model refusals, the secondmate refusal, the generated plugin's directory-confined latch (a foreign-directory session's full cycle writes nothing; an own-directory session still drives busy->idle and the notification touch; both pins fail on the pre-fix generator), the teardown-racing settle refusal, and the control tables against fake binaries.
 Both live guards are token-free and run by default wherever their tools are installed, capability-skipping elsewhere: the signals guard needs `opencode2`, `tmux`, `python3`, `node`, and `curl` and drives the TUI against a localhost mock, and the isolation guard needs `opencode2` and `python3` and runs the real binary against a stand-in operator under the XDG directories, with each isolated verdict paired with a control run that must see the stand-in operator's config.
 
 ## Not verified

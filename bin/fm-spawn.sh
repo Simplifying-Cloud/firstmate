@@ -5408,12 +5408,19 @@ EOF
 // a detached loop that the returned cleanup aborts. Semantic state comes from
 // the session.execution events: started is active, and succeeded, failed, and
 // interrupted (including a manual double-Escape cancel) all close a turn, so an
-// abnormal end can never leave a stale busy record. Scoping latches the first
-// session that starts an execution (the
-// worker's main session - a subagent child session can only start while the
-// main session is already busy) and ignores other sessions' events until the
-// latched session settles, so a child's completion can never clear the
-// worker's busy state. The latched settle touch stays the watcher's wake
+// abnormal end can never leave a stale busy record. The execution events carry
+// no location on the bus, and one server can host sessions from many
+// directories - every location plugin loaded in the shared background server
+// receives every session's execution events - so scoping has two parts: a
+// session becomes a candidate only after a location-carrying event (such as
+// session.inbox.enqueued, which precedes every execution) names this worktree
+// as its directory, and the latch then takes the first candidate that starts
+// an execution (the worker's main session - a subagent child session can only
+// start while the main session is already busy) and ignores every other
+// session until the latched session settles. Without the directory gate one
+// foreign settle in a shared server would busy and settle THIS task from a
+// stranger's session, touching its turn-ended notification mid-turn (verified
+// live, opencode 2.0.32). The latched settle touch stays the watcher's wake
 // NOTIFICATION, never current-state truth, and rides the same gen-guarded
 // writer call (fm-busy-event.sh --touch-turnend): teardown retires the busy
 // contract before removing the notification, so a final settle racing
@@ -5432,15 +5439,20 @@ const busyEvent = (state, event, touchTurnend) =>
 export default {
   id: "fm-busy-state",
   setup: async (ctx) => {
+    const ownDir = "$WT";
     let activeSession = null;
+    const confirmed = new Set();
     const stop = new AbortController();
     (async () => {
       try {
         for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
           const data = event.data || {};
           const sessionID = data.sessionID;
+          if (typeof sessionID === "string" && event.location && event.location.directory === ownDir) {
+            confirmed.add(sessionID);
+          }
           if (event.type === "session.execution.started") {
-            if (activeSession === null) activeSession = sessionID;
+            if (activeSession === null && confirmed.has(sessionID)) activeSession = sessionID;
             if (sessionID === activeSession) await busyEvent("busy", "execution-started");
           } else if (event.type === "session.execution.succeeded" || event.type === "session.execution.failed" || event.type === "session.execution.interrupted") {
             if (sessionID === activeSession) {

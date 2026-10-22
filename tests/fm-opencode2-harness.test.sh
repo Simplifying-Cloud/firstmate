@@ -305,6 +305,13 @@ oc2_event() {  # <type> <sessionID> [extra-json]
   printf '{"type":"%s","data":{"sessionID":"%s"%s}}' "$1" "$2" "${3:+,$3}"
 }
 
+# A location-carrying event, the bus shape (verified live, opencode 2.0.32) that
+# names the directory a session lives in; session.inbox.enqueued precedes every
+# execution and carries it, while the session.execution events carry none.
+oc2_loc_event() {  # <type> <sessionID> <directory>
+  printf '{"type":"%s","data":{"sessionID":"%s"},"location":{"directory":"%s"}}' "$1" "$2" "$3"
+}
+
 test_oc2_plugin_classifies_from_execution_events() {
   local rec id=oc2-plugin-1 out state plugin
   rec=$(make_oc2_spawn_case plugin "$id")
@@ -316,11 +323,13 @@ test_oc2_plugin_classifies_from_execution_events() {
   assert_present "$plugin" "opencode2 spawn did not write the busy-state plugin"
 
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
     "$(oc2_event session.execution.started ses_main)") || fail "busy drive failed: $out"
   out=$(classify "$id" "$state")
   [ "$out" = "busy opencode-plugin" ] || fail "execution start must classify busy, got '$out'"
 
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
     "$(oc2_event session.execution.started ses_main)" \
     "$(oc2_event session.execution.started ses_child)" \
     "$(oc2_event session.execution.succeeded ses_child)") || fail "child drive failed: $out"
@@ -329,6 +338,7 @@ test_oc2_plugin_classifies_from_execution_events() {
 
   rm -f "$state/$id.turn-ended"
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
     "$(oc2_event session.execution.started ses_main)" \
     "$(oc2_event session.retry.scheduled ses_main '"attempt":1')" \
     "$(oc2_event session.execution.interrupted ses_main '"reason":"user"')") || fail "interrupt drive failed: $out"
@@ -340,10 +350,51 @@ test_oc2_plugin_classifies_from_execution_events() {
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
     "$(oc2_event session.execution.started ses_other)" \
     "$(oc2_event session.execution.succeeded ses_other)") || fail "other-session drive failed: $out"
-  [ -f "$state/$id.turn-ended" ] || fail "another session's settle must not touch the marker"
+  [ ! -f "$state/$id.turn-ended" ] || fail "an unconfirmed session's settle must not touch the marker"
   out=$(classify "$id" "$state")
-  [ "$out" = "idle opencode-plugin" ] || fail "another session's settle must not change state, got '$out'"
+  [ "$out" = "idle opencode-plugin" ] || fail "an unconfirmed session's settle must not change state, got '$out'"
   pass "opencode2 plugin classifies from session.execution events, scoped to the latched worker session"
+}
+
+# Regression for the 2026-10-19 cross-task turn-end defect: the execution
+# events carry no location on the bus and every location plugin loaded in one
+# shared background server receives every session's execution events, so one
+# foreign worker's settle latched THIS task's plugin from a stranger's session,
+# flipped its busy record while the task was mid-turn, and touched its
+# turn-ended notification - for every opencode2 task at once, including
+# already-torn-down ones. A session must be confirmed into this worktree by a
+# location-carrying event before any of its execution events count.
+test_oc2_plugin_ignores_foreign_directory_sessions() {
+  local rec id=oc2-plugin-foreign out state plugin armed
+  rec=$(make_oc2_spawn_case plugin-foreign "$id")
+  read_oc2_spawn_record "$rec"
+  out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
+  expect_code 0 "$?" "opencode2 spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  assert_present "$plugin" "opencode2 spawn did not write the busy-state plugin"
+  rm -f "$state/$id.turn-ended"
+  armed=$(cat "$state/$id.busy-state")
+
+  # A full foreign execution cycle in another directory: location confirm names
+  # a different worktree, so none of it may reach this task's records.
+  out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_loc_event session.inbox.enqueued ses_foreign /tmp/fm-oc2-other-worktree)" \
+    "$(oc2_event session.execution.started ses_foreign)" \
+    "$(oc2_event session.execution.succeeded ses_foreign)") || fail "foreign drive failed: $out"
+  [ ! -e "$state/$id.turn-ended" ] || fail "a foreign directory's settle must not touch the notification"
+  [ "$(cat "$state/$id.busy-state")" = "$armed" ] \
+    || fail "a foreign directory's cycle must not rewrite the busy record: $(cat "$state/$id.busy-state")"
+
+  # The same plugin must still serve its own worktree's session end to end.
+  out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
+    "$(oc2_event session.execution.started ses_main)" \
+    "$(oc2_event session.execution.succeeded ses_main)") || fail "own drive failed: $out"
+  [ -f "$state/$id.turn-ended" ] || fail "the own session's settle must touch the notification"
+  out=$(classify "$id" "$state")
+  [ "$out" = "idle opencode-plugin" ] || fail "the own session's settle must classify idle, got '$out'"
+  pass "an opencode2 plugin in a shared server ignores foreign-directory sessions"
 }
 
 # Regression for the 2026-10-17 post-teardown signal: TUI exit fired a final
@@ -369,6 +420,7 @@ test_oc2_plugin_cannot_resurrect_records_after_retire() {
   # The racing final settle: TUI exit can run one last execution cycle, so the
   # latch catches a started before the settle that must be refused whole.
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
     "$(oc2_event session.execution.started ses_main)" \
     "$(oc2_event session.execution.succeeded ses_main)") || fail "post-retire drive failed: $out"
   [ ! -e "$state/$id.turn-ended" ] || fail "a post-retire settle recreated the turn-ended notification"
@@ -408,6 +460,8 @@ test_oc2_binary_resolution_refuses_without_2x \
   test_oc2_secondmate_is_refused \
   &&
   test_oc2_plugin_classifies_from_execution_events \
+  &&
+  test_oc2_plugin_ignores_foreign_directory_sessions \
   &&
   test_oc2_plugin_cannot_resurrect_records_after_retire \
   &&

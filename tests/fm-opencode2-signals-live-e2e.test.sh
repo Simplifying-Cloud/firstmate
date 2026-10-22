@@ -329,6 +329,8 @@ wait_shared_busy() {  # <id>
 wait_shared_busy "$idA" || fail "worker A never entered its shared-server turn"
 oc2_shared_run "$LAB/wtB" & runB=$!
 wait_shared_busy "$idB" || fail "worker B never overlapped worker A on the shared server"
+[ "$(fm_busy_classify tmux "fake:w" opencode2 "$idA" "$home/state")" = "busy opencode-plugin" ] \
+  || fail "worker A settled before worker B became busy; turns did not overlap"
 b_busy=$(cat "$home/state/$idB.busy-state")
 : >"$LAB/b-marker"
 wait "$runA" || fail "shared-server run A failed: $(cat "$LAB/shared-run-wtA.log")"

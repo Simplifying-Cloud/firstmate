@@ -62,6 +62,7 @@ debug)
   # The worker launch itself: record the config dir the worker process got.
   if [ -n "${FM_FAKE_OC2_ENV_LOG:-}" ]; then
     printf 'OPENCODE_CONFIG_DIR=%s\n' "${OPENCODE_CONFIG_DIR-<unset>}" >"$FM_FAKE_OC2_ENV_LOG"
+    printf '%s\n' "$@" >"$FM_FAKE_OC2_ENV_LOG.args"
   fi
   exit 0
   ;;
@@ -182,7 +183,7 @@ test_oc2_binary_resolution_refuses_without_2x() {
 }
 
 test_oc2_spawn_launches_platform_only_and_standalone() {
-  local rec id=oc2-launch-1 out status launch state cfgdir
+  local rec id=oc2-launch-1 out status launch state cfgdir session_id
   rec=$(make_oc2_spawn_case launch "$id")
   read_oc2_spawn_record "$rec"
   out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
@@ -191,6 +192,7 @@ test_oc2_spawn_launches_platform_only_and_standalone() {
   launch=$(grep -F OPENCODE_CONFIG_CONTENT "$CASE_DIR/launch.log" | tail -1)
   [ -n "$launch" ] || fail "no launch line recorded for the opencode2 spawn"
   assert_contains "$launch" "--standalone" "opencode2 launch must run a private server"
+  assert_contains "$launch" "--session" "opencode2 launch must pin its Firstmate session"
   assert_contains "$launch" "--auto" "opencode2 launch must auto-approve permissions"
   assert_contains "$launch" "OPENCODE_DISABLE_AUTOUPDATE=1" "opencode2 launch must disable self-upgrade"
   assert_contains "$launch" "OPENCODE_CONFIG_DIR=" "opencode2 launch must isolate the config dir"
@@ -206,6 +208,12 @@ test_oc2_spawn_launches_platform_only_and_standalone() {
   *) fail "launch did not resolve the fake 2.x binary path: $launch" ;;
   esac
   state="$HOME_DIR/state"
+  session_id=$(cat "$state/$id.opencode-session-id")
+  [[ "$session_id" =~ ^ses_[a-f0-9]{26}$ ]] || fail "Firstmate must persist a valid OpenCode session id, got '$session_id'"
+  out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
+  expect_code 0 "$?" "opencode2 relaunch should succeed: $out"
+  [ "$(cat "$state/$id.opencode-session-id")" = "$session_id" ] \
+    || fail "an opencode2 relaunch must reuse its Firstmate session id"
   cfgdir="$state/$id.opencode-config"
   [ -d "$cfgdir" ] || fail "opencode2 spawn did not create the isolated config dir $cfgdir"
   [ -e "$state/$id.busy-gen" ] || fail "opencode2 spawn did not arm busy wiring"
@@ -218,7 +226,7 @@ test_oc2_spawn_launches_platform_only_and_standalone() {
 }
 
 test_oc2_worker_environment_isolates_the_operator_setup() {
-  local rec id=oc2-env-1 out launch cfgdir want
+  local rec id=oc2-env-1 out launch cfgdir want session_id
   rec=$(make_oc2_spawn_case env "$id")
   read_oc2_spawn_record "$rec"
   out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
@@ -231,6 +239,10 @@ test_oc2_worker_environment_isolates_the_operator_setup() {
     bash -c "$launch") >"$CASE_DIR/launch-run.log" 2>&1 \
     || fail "the staged opencode2 launch did not run: $(cat "$CASE_DIR/launch-run.log")"
   cfgdir=$(sed -n 's/^OPENCODE_CONFIG_DIR=//p' "$CASE_DIR/worker-env" 2>/dev/null)
+  session_id=$(cat "$HOME_DIR/state/$id.opencode-session-id")
+  [ "$(sed -n '3p' "$CASE_DIR/worker-env.args")" = --session ] \
+    && [ "$(sed -n '4p' "$CASE_DIR/worker-env.args")" = "$session_id" ] \
+    || fail "the worker must receive its Firstmate session id after --session"
   want="$(cd -P "$HOME_DIR/state" && pwd)/$id.opencode-config"
   [ "$cfgdir" = "$want" ] \
     || fail "the worker must get its per-task config dir '$want' as OPENCODE_CONFIG_DIR, got '$cfgdir'"
@@ -313,24 +325,25 @@ oc2_loc_event() {  # <type> <sessionID> <directory>
 }
 
 test_oc2_plugin_classifies_from_execution_events() {
-  local rec id=oc2-plugin-1 out state plugin
+  local rec id=oc2-plugin-1 out state plugin session_id
   rec=$(make_oc2_spawn_case plugin "$id")
   read_oc2_spawn_record "$rec"
   out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
   expect_code 0 "$?" "opencode2 spawn should succeed: $out"
   state="$HOME_DIR/state"
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  session_id=$(cat "$state/$id.opencode-session-id")
   assert_present "$plugin" "opencode2 spawn did not write the busy-state plugin"
 
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
-    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
-    "$(oc2_event session.execution.started ses_main)") || fail "busy drive failed: $out"
+    "$(oc2_loc_event session.inbox.enqueued "$session_id" "$WT_DIR")" \
+    "$(oc2_event session.execution.started "$session_id")") || fail "busy drive failed: $out"
   out=$(classify "$id" "$state")
   [ "$out" = "busy opencode-plugin" ] || fail "execution start must classify busy, got '$out'"
 
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
-    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
-    "$(oc2_event session.execution.started ses_main)" \
+    "$(oc2_loc_event session.inbox.enqueued "$session_id" "$WT_DIR")" \
+    "$(oc2_event session.execution.started "$session_id")" \
     "$(oc2_event session.execution.started ses_child)" \
     "$(oc2_event session.execution.succeeded ses_child)") || fail "child drive failed: $out"
   out=$(classify "$id" "$state")
@@ -338,10 +351,10 @@ test_oc2_plugin_classifies_from_execution_events() {
 
   rm -f "$state/$id.turn-ended"
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
-    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
-    "$(oc2_event session.execution.started ses_main)" \
-    "$(oc2_event session.retry.scheduled ses_main '"attempt":1')" \
-    "$(oc2_event session.execution.interrupted ses_main '"reason":"user"')") || fail "interrupt drive failed: $out"
+    "$(oc2_loc_event session.inbox.enqueued "$session_id" "$WT_DIR")" \
+    "$(oc2_event session.execution.started "$session_id")" \
+    "$(oc2_event session.retry.scheduled "$session_id" '"attempt":1')" \
+    "$(oc2_event session.execution.interrupted "$session_id" '"reason":"user"')") || fail "interrupt drive failed: $out"
   out=$(classify "$id" "$state")
   [ "$out" = "idle opencode-plugin" ] || fail "an interrupted turn must close the busy record, got '$out'"
   [ -f "$state/$id.turn-ended" ] || fail "the settle must touch the notification marker"
@@ -350,10 +363,10 @@ test_oc2_plugin_classifies_from_execution_events() {
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
     "$(oc2_event session.execution.started ses_other)" \
     "$(oc2_event session.execution.succeeded ses_other)") || fail "other-session drive failed: $out"
-  [ ! -f "$state/$id.turn-ended" ] || fail "an unconfirmed session's settle must not touch the marker"
+  [ ! -f "$state/$id.turn-ended" ] || fail "a session without the task id must not touch the marker"
   out=$(classify "$id" "$state")
-  [ "$out" = "idle opencode-plugin" ] || fail "an unconfirmed session's settle must not change state, got '$out'"
-  pass "opencode2 plugin classifies from session.execution events, scoped to the latched worker session"
+  [ "$out" = "idle opencode-plugin" ] || fail "a session without the task id must not change state, got '$out'"
+  pass "opencode2 plugin scopes events to the task's pinned session id"
 }
 
 # Regression for the 2026-10-19 cross-task turn-end defect: the execution
@@ -362,22 +375,23 @@ test_oc2_plugin_classifies_from_execution_events() {
 # foreign worker's settle latched THIS task's plugin from a stranger's session,
 # flipped its busy record while the task was mid-turn, and touched its
 # turn-ended notification - for every opencode2 task at once, including
-# already-torn-down ones. A session must be confirmed into this worktree by a
-# location-carrying event before any of its execution events count.
+# already-torn-down ones. Execution events count only when their session id
+# matches the task-owned id supplied at launch.
 test_oc2_plugin_ignores_foreign_directory_sessions() {
-  local rec id=oc2-plugin-foreign out state plugin armed
+  local rec id=oc2-plugin-foreign out state plugin armed session_id
   rec=$(make_oc2_spawn_case plugin-foreign "$id")
   read_oc2_spawn_record "$rec"
   out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
   expect_code 0 "$?" "opencode2 spawn should succeed: $out"
   state="$HOME_DIR/state"
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  session_id=$(cat "$state/$id.opencode-session-id")
   assert_present "$plugin" "opencode2 spawn did not write the busy-state plugin"
   rm -f "$state/$id.turn-ended"
   armed=$(cat "$state/$id.busy-state")
 
-  # A full foreign execution cycle in another directory: location confirm names
-  # a different worktree, so none of it may reach this task's records.
+  # A full foreign execution cycle in another directory must not reach this
+  # task's records.
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
     "$(oc2_loc_event session.inbox.enqueued ses_foreign /tmp/fm-oc2-other-worktree)" \
     "$(oc2_event session.execution.started ses_foreign)" \
@@ -386,11 +400,19 @@ test_oc2_plugin_ignores_foreign_directory_sessions() {
   [ "$(cat "$state/$id.busy-state")" = "$armed" ] \
     || fail "a foreign directory's cycle must not rewrite the busy record: $(cat "$state/$id.busy-state")"
 
+  out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
+    "$(oc2_loc_event session.inbox.enqueued ses_competitor "$WT_DIR")" \
+    "$(oc2_event session.execution.started ses_competitor)" \
+    "$(oc2_event session.execution.succeeded ses_competitor)") || fail "same-worktree competitor drive failed: $out"
+  [ ! -e "$state/$id.turn-ended" ] || fail "a competing same-worktree session must not touch the notification"
+  [ "$(cat "$state/$id.busy-state")" = "$armed" ] \
+    || fail "a competing same-worktree session must not rewrite the busy record"
+
   # The same plugin must still serve its own worktree's session end to end.
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
-    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
-    "$(oc2_event session.execution.started ses_main)" \
-    "$(oc2_event session.execution.succeeded ses_main)") || fail "own drive failed: $out"
+    "$(oc2_loc_event session.inbox.enqueued "$session_id" "$WT_DIR")" \
+    "$(oc2_event session.execution.started "$session_id")" \
+    "$(oc2_event session.execution.succeeded "$session_id")") || fail "own drive failed: $out"
   [ -f "$state/$id.turn-ended" ] || fail "the own session's settle must touch the notification"
   out=$(classify "$id" "$state")
   [ "$out" = "idle opencode-plugin" ] || fail "the own session's settle must classify idle, got '$out'"
@@ -404,12 +426,13 @@ test_oc2_plugin_ignores_foreign_directory_sessions() {
 # plugin's settle must ride the same gen-guarded writer call and be refused
 # whole once the task is torn down.
 test_oc2_plugin_cannot_resurrect_records_after_retire() {
-  local rec id=oc2-plugin-retire out state plugin
+  local rec id=oc2-plugin-retire out state plugin session_id
   rec=$(make_oc2_spawn_case plugin-retire "$id")
   read_oc2_spawn_record "$rec"
   out=$(run_oc2_spawn "$CASE_DIR" "$HOME_DIR" "$FAKEBIN_DIR" "$id" --model zai/glm-5.3)
   expect_code 0 "$?" "opencode2 spawn should succeed: $out"
   state="$HOME_DIR/state"
+  session_id=$(cat "$state/$id.opencode-session-id")
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
   assert_present "$plugin" "opencode2 spawn did not write the busy-state plugin"
   # Teardown's ordering for a live task: retire the busy contract (the meta's
@@ -420,9 +443,9 @@ test_oc2_plugin_cannot_resurrect_records_after_retire() {
   # The racing final settle: TUI exit can run one last execution cycle, so the
   # latch catches a started before the settle that must be refused whole.
   out=$(drive_oc2_plugin "$plugin" "$state" "$id" \
-    "$(oc2_loc_event session.inbox.enqueued ses_main "$WT_DIR")" \
-    "$(oc2_event session.execution.started ses_main)" \
-    "$(oc2_event session.execution.succeeded ses_main)") || fail "post-retire drive failed: $out"
+    "$(oc2_loc_event session.inbox.enqueued "$session_id" "$WT_DIR")" \
+    "$(oc2_event session.execution.started "$session_id")" \
+    "$(oc2_event session.execution.succeeded "$session_id")") || fail "post-retire drive failed: $out"
   [ ! -e "$state/$id.turn-ended" ] || fail "a post-retire settle recreated the turn-ended notification"
   [ ! -e "$state/$id.busy-state" ] || fail "a post-retire settle recreated the busy record"
   out=$(classify "$id" "$state")

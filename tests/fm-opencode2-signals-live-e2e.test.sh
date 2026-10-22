@@ -65,10 +65,11 @@ trap cleanup EXIT
 
 # --- localhost Anthropic-compatible mock: one short streamed turn ------------
 MOCK_PORT=$((20000 + RANDOM % 20000))
-python3 - "$MOCK_PORT" >"$LAB/mock.log" 2>&1 <<'PYEOF' &
+python3 - "$MOCK_PORT" "$LAB/shared-a-requested" >"$LAB/mock.log" 2>&1 <<'PYEOF' &
 import json, socketserver, sys, time
 
 port = int(sys.argv[1])
+shared_a_requested = sys.argv[2]
 sse = b"".join(
     b"event: " + ev.encode() + b"\ndata: " + json.dumps(p).encode() + b"\n\n"
     for ev, p in [
@@ -85,8 +86,13 @@ sse = b"".join(
 class H(socketserver.BaseRequestHandler):
     def handle(self):
         data = self.request.recv(65536)
-        # Hold the turn open long enough for the busy poll to observe it.
-        time.sleep(12)
+        if b"exactly A" in data:
+            open(shared_a_requested, "a").close()
+            time.sleep(20)
+        elif b"exactly B" in data:
+            time.sleep(45)
+        else:
+            time.sleep(6)
         self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" + sse)
 
 class Srv(socketserver.ThreadingTCPServer):
@@ -157,6 +163,7 @@ HOME="$LAB/user-home" FM_ROOT_OVERRIDE='' FM_HOME="$home" \
 plugin="$wt/.opencode/plugins/fm-busy-state.js"
 [ -f "$plugin" ] || fail "fixture spawn wrote no busy-state plugin"
 gen=$(cat "$home/state/$id.busy-gen")
+live_session_id=$(cat "$home/state/$id.opencode-session-id")
 turnend="$home/state/$id.turn-ended"
 rm -f "$turnend"
 
@@ -164,7 +171,7 @@ rm -f "$turnend"
 cfgdir="$home/state/$id.opencode-config"
 cfg='{"permission":{"*":"allow"},"model":"mockz/mock-1","providers":{"mockz":{"name":"Mock Z","package":"@opencode/ai/providers/anthropic-compatible","settings":{"baseURL":"http://127.0.0.1:'"$MOCK_PORT"'","apiKey":"mock"},"models":{"mock-1":{"name":"Mock 1","capabilities":{"tools":true},"limit":{"context":100000,"output":4096}}}}},"policies":[{"action":"provider.use","resource":"*","effect":"deny"},{"action":"provider.use","resource":"mockz","effect":"allow"}]}'
 tmux -L "$SOCKET" new-session -d -s "$SESSION" -x 100 -y 30 -c "$wt" \
-  "env OPENCODE_CONFIG_DIR='$cfgdir' OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='$cfg' '$OC2_BIN' --standalone --auto --prompt 'Reply with exactly OK.'; rc=\$?; printf 'OC2_EXIT=%s\\n' \"\$rc\"; sleep 300"
+  "env OPENCODE_CONFIG_DIR='$cfgdir' OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_CONFIG_CONTENT='$cfg' '$OC2_BIN' --standalone --auto --session '$live_session_id' --prompt 'Reply with exactly OK.'; rc=\$?; printf 'OC2_EXIT=%s\\n' \"\$rc\"; sleep 300"
 
 capture() { tmux -L "$SOCKET" capture-pane -p -t "$SESSION" 2>/dev/null || true; }
 
@@ -285,15 +292,17 @@ for pair in "$idA:$LAB/wtA" "$idB:$LAB/wtB"; do
     || fail "fixture spawn failed for $id: $(cat "$LAB/shared-spawn.log")"
 done
 
-oc2_shared_run() {  # <worktree>
+oc2_shared_run() {  # <worktree> <task-id>
   (
-    cd "$1" &&
+      cd "$1" &&
+      shared_session_id=$(cat "$home/state/$2.opencode-session-id") &&
+      if [ "$2" = "$idA" ]; then shared_prompt='Reply with exactly A.'; else shared_prompt='Reply with exactly B.'; fi &&
       env HOME="$LAB/user-home" FM_OC2_SHARED_MARK="$SHARED_MARK" \
         XDG_CONFIG_HOME="$SG/xdg/config" XDG_DATA_HOME="$SG/xdg/data" \
         XDG_STATE_HOME="$SG/xdg/state" XDG_CACHE_HOME="$SG/xdg/cache" \
         OPENCODE_CONFIG_DIR="$SG/cfg" OPENCODE_DISABLE_AUTOUPDATE=1 \
         OPENCODE_CONFIG_CONTENT="$cfg" \
-        timeout 120 "$OC2_BIN" run 'Reply with exactly OK.' </dev/null \
+        timeout 120 "$OC2_BIN" run --session "$shared_session_id" "$shared_prompt" </dev/null \
         >"$LAB/shared-run-$(basename "$1").log" 2>&1
   )
 }
@@ -314,7 +323,7 @@ wait_shared_idle() {  # <id>
 # Keep both turns active on the shared server at once. The delayed provider
 # response leaves enough time to observe both busy records before either turn
 # can settle, then A's settle must leave B's active records untouched.
-oc2_shared_run "$LAB/wtA" & runA=$!
+oc2_shared_run "$LAB/wtA" "$idA" & runA=$!
 wait_shared_busy() {  # <id>
   local i=0 current
   while [ "$i" -lt 120 ]; do
@@ -327,7 +336,12 @@ wait_shared_busy() {  # <id>
   return 1
 }
 wait_shared_busy "$idA" || fail "worker A never entered its shared-server turn"
-oc2_shared_run "$LAB/wtB" & runB=$!
+for ((attempt = 0; attempt < 120; attempt++)); do
+  [ -f "$LAB/shared-a-requested" ] && break
+  sleep 0.25
+done
+[ -f "$LAB/shared-a-requested" ] || fail "worker A never reached the shared mock provider"
+oc2_shared_run "$LAB/wtB" "$idB" & runB=$!
 wait_shared_busy "$idB" || fail "worker B never overlapped worker A on the shared server"
 [ "$(fm_busy_classify tmux "fake:w" opencode2 "$idA" "$home/state")" = "busy opencode-plugin" ] \
   || fail "worker A settled before worker B became busy; turns did not overlap"
@@ -357,7 +371,7 @@ wait_shared_idle "$idB" || fail "worker B never settled on the shared server"
 # second session in A's worktree must advance A's busy record through a full
 # cycle - wait for the settle, not the intermediate busy write, because only
 # the accepted settle carries the notification touch.
-oc2_shared_run "$LAB/wtA" || fail "shared-server run A2 failed: $(cat "$LAB/shared-run-wtA.log")"
+oc2_shared_run "$LAB/wtA" "$idA" || fail "shared-server run A2 failed: $(cat "$LAB/shared-run-wtA.log")"
 i=0
 while [ "$i" -lt 120 ]; do
   cur=$(cat "$home/state/$idA.busy-state" 2>/dev/null)

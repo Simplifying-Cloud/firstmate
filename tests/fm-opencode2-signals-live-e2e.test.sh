@@ -86,7 +86,7 @@ class H(socketserver.BaseRequestHandler):
     def handle(self):
         data = self.request.recv(65536)
         # Hold the turn open long enough for the busy poll to observe it.
-        time.sleep(6)
+        time.sleep(12)
         self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" + sse)
 
 class Srv(socketserver.ThreadingTCPServer):
@@ -311,21 +311,44 @@ wait_shared_idle() {  # <id>
   return 1
 }
 
-# Worker A's own turn settles on the shared server first.
-oc2_shared_run "$LAB/wtA" || fail "shared-server run A failed: $(cat "$LAB/shared-run-wtA.log")"
+# Keep both turns active on the shared server at once. The delayed provider
+# response leaves enough time to observe both busy records before either turn
+# can settle, then A's settle must leave B's active records untouched.
+oc2_shared_run "$LAB/wtA" & runA=$!
+wait_shared_busy() {  # <id>
+  local i=0 current
+  while [ "$i" -lt 120 ]; do
+    current=$(fm_busy_classify tmux "fake:w" opencode2 "$1" "$home/state")
+    [ "$current" = "busy opencode-plugin" ] && return 0
+    sleep 0.25
+    i=$((i + 1))
+  done
+  cat "$home/state/$1.busy-state" >&2 2>/dev/null || true
+  return 1
+}
+wait_shared_busy "$idA" || fail "worker A never entered its shared-server turn"
+oc2_shared_run "$LAB/wtB" & runB=$!
+wait_shared_busy "$idB" || fail "worker B never overlapped worker A on the shared server"
+b_busy=$(cat "$home/state/$idB.busy-state")
+: >"$LAB/b-marker"
+wait "$runA" || fail "shared-server run A failed: $(cat "$LAB/shared-run-wtA.log")"
 wait_shared_idle "$idA" || fail "worker A never settled on the shared server"
 [ -f "$home/state/$idA.turn-ended" ] || fail "worker A's own settle must touch its notification"
+[ "$(cat "$home/state/$idB.busy-state")" = "$b_busy" ] \
+  || fail "worker A's settle rewrote worker B's active busy record: $(cat "$home/state/$idB.busy-state")"
+[ ! -e "$home/state/$idB.turn-ended" ] \
+  || fail "worker A's settle touched worker B's active turn-ended notification"
+
+# B's settle must likewise leave A's settled records untouched.
 a_rec=$(cat "$home/state/$idA.busy-state")
 : >"$LAB/a-marker"
-
-# Worker B's full cycle in a foreign worktree must leave A's records untouched.
-oc2_shared_run "$LAB/wtB" || fail "shared-server run B failed: $(cat "$LAB/shared-run-wtB.log")"
+wait "$runB" || fail "shared-server run B failed: $(cat "$LAB/shared-run-wtB.log")"
 wait_shared_idle "$idB" || fail "worker B never settled on the shared server"
 [ -f "$home/state/$idB.turn-ended" ] || fail "worker B's own settle must touch its notification"
 [ "$(cat "$home/state/$idA.busy-state")" = "$a_rec" ] \
-  || fail "a foreign worktree's settle rewrote worker A's busy record: $(cat "$home/state/$idA.busy-state")"
+  || fail "worker B's settle rewrote worker A's busy record: $(cat "$home/state/$idA.busy-state")"
 [ "$home/state/$idA.turn-ended" -nt "$LAB/a-marker" ] \
-  && fail "a foreign worktree's settle re-touched worker A's turn-ended notification"
+  && fail "worker B's settle re-touched worker A's turn-ended notification"
 
 # Non-vacuity: A's plugin must still be alive in that server and reacting to
 # its OWN directory, or the untouched records above would prove nothing. A

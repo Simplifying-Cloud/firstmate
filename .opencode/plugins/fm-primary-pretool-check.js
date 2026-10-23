@@ -17,7 +17,9 @@ import { createSessionScope } from "./lib/fm-session-scope.js";
 // event.input.command; V1's bash tool named it output.args.command. One 2.x
 // server hosts sessions from many directories and every location plugin
 // receives every session's tool calls, so the guard acts only on sessions at
-// this plugin's own root (lib/fm-session-scope.js).
+// this plugin's own root, subagent child sessions at that root included - V1
+// guarded every bash tool call in the checkout regardless of session
+// (lib/fm-session-scope.js).
 
 function runProcess(command, args) {
   return new Promise((resolvePromise) => {
@@ -58,7 +60,7 @@ export default {
       if (event?.tool !== "shell") return;
       const command = event.input && typeof event.input === "object" ? event.input.command : undefined;
       if (!command || typeof command !== "string") return;
-      if (!(await scope.ownsSession(ctx, event.sessionID))) return;
+      if (!(await scope.ownsSessionAtRoot(ctx, event.sessionID))) return;
 
       const result = await runProcess(`${root}/bin/fm-arm-pretool-check.sh`, ["--command", command]);
       if (result.code !== 2) return;

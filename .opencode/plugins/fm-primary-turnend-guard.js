@@ -32,6 +32,11 @@ const TURN_END_EVENTS = new Set([
 ]);
 const skipNextTurnEnd = new Set();
 
+function markSkipNextTurnEnd(sessionID) {
+  if (skipNextTurnEnd.size >= 512) skipNextTurnEnd.clear();
+  skipNextTurnEnd.add(sessionID);
+}
+
 function runProcess(command, args, input = "") {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -76,8 +81,8 @@ function runGuard(root) {
   return runProcess(`${root}/bin/fm-turnend-guard.sh`, [], '{"stop_hook_active":false}');
 }
 
-async function letWatchArmRun(sessionID, ctx) {
-  const coordinator = globalThis[COORDINATOR_KEY];
+async function letWatchArmRun(root, sessionID, ctx) {
+  const coordinator = globalThis[COORDINATOR_KEY + root];
   if (!coordinator?.ensureArmed) return false;
   const status = await coordinator.ensureArmed(sessionID, ctx);
   return status === "armed" || status === "wake" || status === "failed";
@@ -104,7 +109,7 @@ export default {
               continue;
             }
 
-            if (await letWatchArmRun(sessionID, ctx)) continue;
+            if (await letWatchArmRun(root, sessionID, ctx)) continue;
 
             const result = await runGuard(root);
             if (result.code !== 2) continue;
@@ -118,7 +123,7 @@ export default {
                   result.stderr,
               );
               await ctx.session.prompt({ sessionID, text });
-              skipNextTurnEnd.add(sessionID);
+              markSkipNextTurnEnd(sessionID);
             } catch {
               skipNextTurnEnd.delete(sessionID);
             }

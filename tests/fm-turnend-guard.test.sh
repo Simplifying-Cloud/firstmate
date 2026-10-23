@@ -1038,6 +1038,7 @@ const driver = await loadOpencodePlugin(process.env.PLUGIN, {
   sessionDirectory: (sessionID) => (sessionID === "session-foreign"
     ? "/tmp/fm-opencode-plugin-foreign-elsewhere"
     : process.env.LAUNCH_DIR),
+  sessionParentID: (sessionID) => (sessionID === "session-child" ? "session-test" : undefined),
 });
 await driver.emit(turnEndEvent("session-test"));
 const promptBody = driver.prompts[0] ?? "";
@@ -1060,6 +1061,10 @@ if (promptBody.includes("Resume supervision according to the session-start opera
 // One 2.x server hosts sessions from many directories: a foreign session's
 // turn end must never fire this guard or prompt that stranger's session.
 await driver.emit(turnEndEvent("session-foreign"));
+// The guard is an event plugin scoped to top-level sessions: a subagent
+// child session's turn end at this same root never fires it - the tool
+// seatbelts, not this guard, cover a child session's shell calls.
+await driver.emit(turnEndEvent("session-child"));
 // The guard's own follow-up close is skipped exactly once per session.
 await driver.emit(turnEndEvent("session-test"));
 if (driver.prompts.length !== 1) {

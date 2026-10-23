@@ -4,7 +4,9 @@
 # V2 default-export shape, the shell-tool deny contract (exit 2 plus stderr
 # surfaced by throwing from ctx.tool.hook("execute.before")), and the
 # session-at-own-root scope that keeps a shared 2.x server's foreign sessions
-# and subagent children unguarded. The deny-by-throw mechanism itself is
+# unguarded while subagent child sessions at the same root stay guarded -
+# V1 ran the seatbelts on every bash tool call in the checkout regardless of
+# session. The deny-by-throw mechanism itself is
 # verified live against opencode 2.1.4 (see
 # .agents/skills/harness-adapters/references/harness/opencode.md "OpenCode 2.x");
 # this suite pins the plugin logic with real fixture scripts and no harness.
@@ -81,14 +83,18 @@ if (await denied({ tool: "bash", sessionID: "session-own", input: { command: "ec
   throw new Error("the 1.x bash tool name must be ignored on 2.x");
 }
 
-// A foreign session on the same server, and a subagent child session, are
-// never this location's to guard.
+// A foreign session on the same server is never this location's to guard,
+// while a subagent child session at this root stays guarded: V1 ran the
+// seatbelt on every bash tool call in the checkout regardless of session.
 if (await denied({ ...own, sessionID: "session-foreign" }) !== null) throw new Error("foreign session was guarded");
-if (await denied({ ...own, sessionID: "session-child" }) !== null) throw new Error("child session was guarded");
+const childReason = await denied({ ...own, sessionID: "session-child" });
+if (!childReason || !childReason.includes("fixture denial")) {
+  throw new Error(`expected the child session at this root to be guarded, got ${childReason}`);
+}
 EOF
   ) || fail "$plugin portable behavior: $out"
   [ -z "$out" ] || fail "$plugin portable behavior printed output: $out"
-  pass "$plugin: V2 hook denies own shell sessions only, with the script's reason"
+  pass "$plugin: V2 hook denies sessions at this root, child sessions included, with the script's reason"
 done
 
 # The plugins load beneath the explicit ESM package boundary with their lib.

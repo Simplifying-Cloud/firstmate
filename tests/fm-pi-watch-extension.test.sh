@@ -4256,7 +4256,7 @@ await driver.emit(event);
 // coordinator rather than waiting a fixed span: refusing an unowned lock walks
 // git and ps probes that can outlast any such span, and the owned-lock event
 // below would then be answered from the refusal instead of arming.
-const refusal = await globalThis.__firstmateOpenCodeWatchArm.ensureArmed("session-test", driver.ctx);
+const refusal = await globalThis[`__firstmateOpenCodeWatchArm${process.env.WORKTREE}`].ensureArmed("session-test", driver.ctx);
 if (refusal !== "read-only") {
   console.error(`expected a read-only refusal without the session lock, got ${refusal}`);
   process.exit(1);
@@ -4306,7 +4306,7 @@ const { loadOpencodePlugin, turnEndEvent } = await import(pathToFileURL(process.
 
 const driver = await loadOpencodePlugin(process.env.PLUGIN, { directory: process.env.WORKTREE });
 writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
-const status = await globalThis.__firstmateOpenCodeWatchArm.ensureArmed("session-test", driver.ctx);
+const status = await globalThis[`__firstmateOpenCodeWatchArm${process.env.WORKTREE}`].ensureArmed("session-test", driver.ctx);
 await new Promise((resolve) => setTimeout(resolve, 120));
 if (status !== "not-primary") {
   console.error(`expected not-primary, got ${status}`);

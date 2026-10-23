@@ -15,9 +15,11 @@ import { createSessionScope } from "./lib/fm-session-scope.js";
 // input carries the command as event.input.command; V1's bash tool named it
 // output.args.command. One 2.x server hosts sessions from many directories
 // and every location plugin receives every session's tool calls, so the
-// guard acts only on top-level sessions at this plugin's own root
-// (lib/fm-session-scope.js). The owner script is itself inert outside the
-// real primary checkout, so a crewmate/scout worktree is never affected.
+// guard acts only on sessions at this plugin's own root, subagent child
+// sessions at that root included - V1 guarded every bash tool call in the
+// checkout regardless of session (lib/fm-session-scope.js). The owner
+// script is itself inert outside the real primary checkout, so a
+// crewmate/scout worktree is never affected.
 
 function runProcess(command, args) {
   return new Promise((resolvePromise) => {
@@ -59,7 +61,7 @@ export default {
       const command = event.input && typeof event.input === "object"
         && typeof event.input.command === "string" ? event.input.command : undefined;
       if (!command) return;
-      if (!(await scope.ownsSession(ctx, event.sessionID))) return;
+      if (!(await scope.ownsSessionAtRoot(ctx, event.sessionID))) return;
 
       const result = await runProcess(`${root}/bin/fm-cd-pretool-check.sh`, ["--command", command]);
       if (result.code !== 2) return;

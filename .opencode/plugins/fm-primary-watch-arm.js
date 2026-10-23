@@ -30,7 +30,9 @@ const COORDINATOR_KEY = "__firstmateOpenCodeWatchArm";
 // prompts are delivered with ctx.session.prompt (2.x form of V1's
 // client.session.promptAsync; verified live on 2.1.4: an admitted plugin
 // prompt drives a follow-up execution in the same session). The globalThis
-// coordinator handshake with the turn-end guard is unchanged.
+// coordinator handshake with the turn-end guard is keyed per root
+// (COORDINATOR_KEY + root), so two firstmate locations sharing one 2.x
+// server never consult each other's watcher.
 const TURN_END_EVENTS = new Set([
   "session.execution.succeeded",
   "session.execution.failed",
@@ -565,7 +567,7 @@ export default {
     const root = await resolveRoot(ctx.location?.directory);
     const paths = effectivePaths(root);
     const scope = createSessionScope(root);
-    globalThis[COORDINATOR_KEY] = {
+    globalThis[COORDINATOR_KEY + root] = {
       ensureArmed: (sessionID, activeCtx) => ensureArm(paths, sessionID, activeCtx ?? ctx),
     };
 

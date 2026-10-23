@@ -7,14 +7,18 @@ import { spawn } from "node:child_process";
 // plugin loaded in that server receives every hosted session's events, so a
 // primary plugin that acted on every event would act for strangers: a foreign
 // session's turn end would fire the guard's follow-up into that stranger's
-// session. Each plugin therefore acts only on sessions whose own location
+// session. Every plugin therefore acts only on sessions whose own location
 // directory resolves (git toplevel, matching the plugin's resolveRoot of
-// ctx.location.directory) to the plugin's root, and only on top-level
-// sessions (no parentID), preserving the V1 single-directory gating: active
-// in the primary checkout and a secondmate home, silent for foreign sessions
-// and crewmate/scout worktrees where the owner scripts are themselves inert.
-// The execution events carry no location on the bus and one server hosts
-// every session, so the session's directory is read through ctx.session.get()
+// ctx.location.directory) to the plugin's root, preserving the V1
+// single-directory gating: active in the primary checkout and a secondmate
+// home, silent for foreign sessions and crewmate/scout worktrees where the
+// owner scripts are themselves inert. The event plugins (nudge, turn-end
+// guard, watch arm) additionally act only on top-level sessions (no
+// parentID); the PreToolUse seatbelts instead keep V1's guard-every-bash-
+// tool-call semantics and cover child sessions at their own root too
+// (ownsSessionAtRoot). The execution events carry no location on the bus
+// and one server hosts every session, so the session's directory is read
+// through ctx.session.get()
 // (verified live, opencode 2.1.4); a session that cannot be read is not ours
 // to act on. Lookups are cached per session id and per directory with a
 // bounded clear so a long-lived shared server cannot grow them without end.
@@ -48,7 +52,7 @@ async function resolveRoot(anchor) {
 }
 
 export function createSessionScope(root) {
-  const sessionDirectories = new Map();
+  const sessionRecords = new Map();
   const resolvedRoots = new Map();
 
   async function resolveRootCached(directory) {
@@ -59,11 +63,11 @@ export function createSessionScope(root) {
     return resolved;
   }
 
-  async function sessionDirectory(ctx, sessionID) {
-    if (!sessionID) return "";
-    if (sessionDirectories.has(sessionID)) return sessionDirectories.get(sessionID);
+  async function sessionRecord(ctx, sessionID) {
+    if (!sessionID) return { directory: "", parented: false };
+    if (sessionRecords.has(sessionID)) return sessionRecords.get(sessionID);
     let directory = "";
-    let parented = true;
+    let parented = false;
     try {
       const session = await ctx.session.get({ sessionID });
       directory = session?.location?.directory ?? "";
@@ -71,9 +75,9 @@ export function createSessionScope(root) {
     } catch {
       // A session that cannot be read is not ours to act on.
     }
-    if (sessionDirectories.size >= 512) sessionDirectories.clear();
-    sessionDirectories.set(sessionID, parented ? "" : directory);
-    return sessionDirectories.get(sessionID);
+    if (sessionRecords.size >= 512) sessionRecords.clear();
+    sessionRecords.set(sessionID, { directory, parented });
+    return sessionRecords.get(sessionID);
   }
 
   return {
@@ -84,9 +88,20 @@ export function createSessionScope(root) {
       return (await resolveRootCached(directory)) === root;
     },
     // Whether a live session on this server belongs to this plugin's
-    // location root; child sessions (subagents) never do.
+    // location root as a top-level session; child sessions (subagents)
+    // never do. The event plugins (nudge, turn-end guard, watch arm) use
+    // this scope.
     async ownsSession(ctx, sessionID) {
-      const directory = await sessionDirectory(ctx, sessionID);
+      const { directory, parented } = await sessionRecord(ctx, sessionID);
+      if (parented || !directory || !root) return false;
+      return (await resolveRootCached(directory)) === root;
+    },
+    // Whether a live session's own directory resolves to this plugin's
+    // location root regardless of parentID; the PreToolUse seatbelts use
+    // this scope because V1 guarded every bash tool call in the checkout,
+    // subagent child sessions included.
+    async ownsSessionAtRoot(ctx, sessionID) {
+      const { directory } = await sessionRecord(ctx, sessionID);
       if (!directory || !root) return false;
       return (await resolveRootCached(directory)) === root;
     },

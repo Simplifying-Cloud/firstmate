@@ -41,9 +41,9 @@ In a home with `config/supervision-host` and no `config/supervision-host-off` th
 `opencode run` can exit before displaying a queued follow-up, so the adapter steps aside in headless mode.
 On native Windows, the operational-input adapter runs its Bash helper through `bash`; macOS and Linux invoke it directly.
 The bash tool is named `shell` on 2.x and its input carries the command as `input.command` (verified 2.1.4); the V1 hook read `tool === "bash"` and `output.args.command`.
-One 2.x server hosts sessions from many directories and every location plugin receives every hosted session's events and tool calls, so each primary plugin acts only on top-level sessions at its own root (`lib/fm-session-scope.js`, session directory read through `ctx.session.get` because the execution events carry no location).
+One 2.x server hosts sessions from many directories and every location plugin receives every hosted session's events and tool calls, so each primary plugin acts only on sessions at its own root (`lib/fm-session-scope.js`, session directory read through `ctx.session.get` because the execution events carry no location): the nudge, turn-end guard, and watch arm act only on top-level sessions, while the two PreToolUse seatbelts keep V1's guard-every-bash-tool-call semantics and also cover subagent child sessions at the same root.
 
-The companion `.opencode/plugins/fm-primary-watch-arm.js` owns normal TUI watcher supervision, wakes it with `ctx.session.prompt`, and coordinates with the guard before a blind-turn follow-up through the unchanged globalThis coordinator handshake.
+The companion `.opencode/plugins/fm-primary-watch-arm.js` owns normal TUI watcher supervision, wakes it with `ctx.session.prompt`, and coordinates with the guard before a blind-turn follow-up through the globalThis coordinator handshake, keyed per root so two firstmate locations sharing one 2.x server never consult each other's watcher.
 The PreToolUse-equivalent watcher-arm seatbelt blocks by throwing from `ctx.tool.hook("execute.before")`, and the thrown message surfaces as the failed tool result (verified live on 2.1.4).
 
 ## OpenCode 2.x (harness `opencode2`)

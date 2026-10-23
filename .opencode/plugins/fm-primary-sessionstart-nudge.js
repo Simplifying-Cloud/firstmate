@@ -20,6 +20,11 @@ import { createSessionScope } from "./lib/fm-session-scope.js";
 
 const handledSessions = new Set();
 
+function rememberSession(sessionID) {
+  if (handledSessions.size >= 512) handledSessions.clear();
+  handledSessions.add(sessionID);
+}
+
 function runProcess(command, args) {
   return new Promise((resolveResult) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
@@ -64,10 +69,10 @@ export default {
             const sessionID = data.sessionID;
             if (!sessionID || handledSessions.has(sessionID) || !root) continue;
             if (data.parentID || !(await scope.ownsDirectory(data.location?.directory))) {
-              handledSessions.add(sessionID);
+              rememberSession(sessionID);
               continue;
             }
-            handledSessions.add(sessionID);
+            rememberSession(sessionID);
 
             const result = await runProcess(`${root}/bin/fm-sessionstart-nudge.sh`, []);
             const nudge = result.code === 0 ? result.stdout.trim() : "";

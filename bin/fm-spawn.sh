@@ -3228,11 +3228,12 @@ if [ "$KIND" = secondmate ] && [ "$HARNESS" = rovo ]; then
   exit 1
 fi
 
-# opencode2 carries the same gap: its 2.x primary integration (turn-end guard,
-# watch-arm, session-start nudge plugins) is not verified - the tracked
-# .opencode/plugins are the 1.x named-export form, which the 2.x plugin loader
-# ignores - so an opencode2 secondmate could never arm a supervision cycle
-# (verified against the 2.x loader contract, opencode 2.0.32).
+# opencode2 still carries a primary-supervision gap: the tracked
+# .opencode/plugins are ported to the 2.x default-export form and
+# live-verified on 2.1.4 for loading, tool-guard blocking, and one follow-up
+# prompt, but full TUI watcher continuity is not verified end to end on 2.x -
+# so an opencode2 secondmate could never be trusted to keep its watch cycle
+# armed.
 if [ "$KIND" = secondmate ] && [ "$HARNESS" = opencode2 ]; then
   echo "error: opencode2 is a verified crewmate/scout adapter only and cannot run a secondmate; its 2.x primary supervision integration is not verified. Select a harness verified for secondmates." >&2
   exit 1

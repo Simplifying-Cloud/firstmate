@@ -183,7 +183,7 @@ const driver = await loadOpencodePlugin(process.env.PLUGIN, {
 await driver.emit(sessionCreatedEvent("session-nudge-test", process.env.WORKTREE));
 await driver.emit(sessionCreatedEvent("session-nudge-test", process.env.WORKTREE));
 // One 2.x server hosts sessions from many directories: a session created at
-// a foreign directory must never receive this location's nudge.
+// a foreign directory must never receive the nudge from this location.
 await driver.emit(sessionCreatedEvent("session-nudge-foreign", process.env.FOREIGN));
 await driver.emit(sessionCreatedEvent("session-nudge-child", process.env.WORKTREE, { parentID: "session-nudge-test" }));
 if (driver.prompts.length !== 1) throw new Error(`expected one prompt, got ${driver.prompts.length}`);

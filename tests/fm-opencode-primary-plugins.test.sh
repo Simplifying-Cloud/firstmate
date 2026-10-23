@@ -83,7 +83,7 @@ if (await denied({ tool: "bash", sessionID: "session-own", input: { command: "ec
   throw new Error("the 1.x bash tool name must be ignored on 2.x");
 }
 
-// A foreign session on the same server is never this location's to guard,
+// A foreign session on the same server is never for this location to guard,
 // while a subagent child session at this root stays guarded: V1 ran the
 // seatbelt on every bash tool call in the checkout regardless of session.
 if (await denied({ ...own, sessionID: "session-foreign" }) !== null) throw new Error("foreign session was guarded");

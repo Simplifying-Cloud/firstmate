@@ -1058,14 +1058,14 @@ if (promptBody.includes("Resume supervision according to the session-start opera
   console.error(`ordinary continuity leaked into guard follow-up: ${promptBody}`);
   process.exit(1);
 }
-// One 2.x server hosts sessions from many directories: a foreign session's
-// turn end must never fire this guard or prompt that stranger's session.
+// One 2.x server hosts sessions from many directories: the turn end of a
+// foreign session must never fire this guard or prompt that other session.
 await driver.emit(turnEndEvent("session-foreign"));
-// The guard is an event plugin scoped to top-level sessions: a subagent
-// child session's turn end at this same root never fires it - the tool
-// seatbelts, not this guard, cover a child session's shell calls.
+// The guard is an event plugin scoped to top-level sessions: the turn end
+// of a subagent child session at this same root never fires it - the tool
+// seatbelts, not this guard, cover child session shell calls.
 await driver.emit(turnEndEvent("session-child"));
-// The guard's own follow-up close is skipped exactly once per session.
+// The follow-up close from the guard itself is skipped exactly once per session.
 await driver.emit(turnEndEvent("session-test"));
 if (driver.prompts.length !== 1) {
   console.error(`expected exactly one prompt, got ${driver.prompts.length}`);

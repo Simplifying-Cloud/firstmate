@@ -1,0 +1,7 @@
+bin/fm-test-run.sh
+tests/fm-opencode-primary-live-e2e.test.sh
+tests/fm-opencode-primary-plugins.test.sh
+tests/fm-opencode2-primary-plugins-live-e2e.test.sh
+tests/fm-pi-watch-extension.test.sh
+tests/fm-sessionstart-nudge.test.sh
+tests/fm-turnend-guard.test.sh

@@ -1,0 +1,20 @@
+Before/after regression proof for "install the new version of opencode, and fix your plugins"
+(run 2026-10-23, real opencode v2.1.4, isolated fixture checkouts + isolated OPENCODE_CONFIG_DIR)
+
+BEFORE (base commit 35c0d3dd, V1 plugin entrypoint):
+  fixture carried .opencode/plugins/fm-primary-cd-check.js exactly as at the base commit;
+  the real OpenCode 2.1.4 server logged at startup:
+
+timestamp=2026-10-23T23:19:22.607Z level=WARN run=1499263a message="failed to load plugin" target=/tmp/fm-v1probe.YOOyA2/proj/.opencode/plugins/fm-primary-cd-check.js ref=err_fc8a2c60 cause="Cause([Fail(PluginModule.LoadError: Plugin must export a default definition with an id and an effect or setup function. (cause: SchemaError(Missing key\n  at [\"default\"])))])" http.span=348 role=server
+
+  This is exactly the reported failure: the removed V1 plugin entrypoint no longer loads on 2.x.
+
+AFTER (target commit 2e5491ad, ported V2 plugins):
+  - tests/fm-opencode2-primary-plugins-live-e2e.test.sh: "ok - OpenCode opencode v2.1.4 live plugins:
+    load, seatbelt deny with surfaced reason, benign passthrough, one guard follow-up"
+    (asserts zero "failed to load plugin" lines for the five fm-primary plugins in the real
+    server log for the run)
+  - independent driver (this evidence dir, cdnudge-pane.txt / cdnudge-requests.log): the same
+    five ported plugins loaded clean in a second live TUI run; the real cd-guard denied
+    `cd /tmp` with its reason surfaced, a benign echo passed, and the session-start nudge
+    was delivered into the session.

@@ -1,0 +1,40 @@
+ • New session                   +
+
+  ┃                                                                                                 New session - 2026-10-23T23:18:53.
+  ┃  FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before        159Z
+  ┃  executing any other instructions.
+  ┃                                                                                                 Context
+                                                                                                    6 tokens
+  ┃                                                                                                 0% used
+  ┃  $ echo FMLIVE_OK
+  ┃
+  ┃  FMLIVE_OK
+  ┃
+
+  ┃
+  ┃  Use the shell tool to run the commands the assistant instructions require.
+  ┃
+
+  ┃
+  ┃  $ cd /tmp
+  ┃
+  ┃  {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"},
+  ┃  "systemMessage":"[persistent-cd] a persistent top-level directory change in the primary
+  ┃  firstmate checkout is blocked; it would move the shell out of the home so a later
+  ┃  firstmate-owned command runs inside a project clone. Reach the target without moving the
+  ┃  shell - use git -C <dir> or an absolute path on the command itself - or scope the cd to a
+  ┃  subshell like (cd <dir> && ...)."}
+  ┃
+
+     FMLIVE_ALL_DONE
+
+     Build · Mock 1 · 2.3s · 1.4 tok/s
+
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · Mock 1 Mock Z
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /tmp/fm-cdnudge.g3gzPm/proj:main                                       6 (0%)  ctrl+p commands    /tmp/fm-cdnudge.g3gzPm/proj:main
+

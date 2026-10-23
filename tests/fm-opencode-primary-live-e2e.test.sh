@@ -150,9 +150,12 @@ run_ahoy_transcript_regressions() {
     "$AHOY_PROJECT/.agents/skills/bearings" \
     "$AHOY_PROJECT/bin"
   git init -q "$AHOY_PROJECT"
+  mkdir -p "$AHOY_PROJECT/.opencode/plugins/lib"
   cp "$ROOT/.opencode/plugins/fm-primary-sessionstart-nudge.js" \
     "$ROOT/.opencode/plugins/package.json" \
     "$AHOY_PROJECT/.opencode/plugins/"
+  cp "$ROOT/.opencode/plugins/lib/fm-session-scope.js" \
+    "$AHOY_PROJECT/.opencode/plugins/lib/fm-session-scope.js"
   cp \
     "$ROOT/bin/fm-sessionstart-nudge.sh" \
     "$ROOT/bin/fm-primary-scope-lib.sh" \
@@ -294,6 +297,8 @@ git clone -q "$ROOT" "$PROJECT"
 mkdir -p "$PROJECT/.opencode/plugins/lib"
 cp "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$PROJECT/.opencode/plugins/fm-primary-watch-arm.js"
 cp "$ROOT/.opencode/plugins/lib/fm-operational-input.js" "$PROJECT/.opencode/plugins/lib/fm-operational-input.js"
+cp "$ROOT/.opencode/plugins/lib/fm-session-scope.js" "$PROJECT/.opencode/plugins/lib/fm-session-scope.js"
+cp "$ROOT/.opencode/plugins/lib/fm-session-scope.js" "$PROJECT/.opencode/plugins/lib/fm-session-scope.js"
 cp "$ROOT/bin/fm-watch-arm.sh" "$PROJECT/bin/fm-watch-arm.sh"
 cp "$ROOT/bin/fm-operational-input.sh" "$PROJECT/bin/fm-operational-input.sh"
 chmod +x "$PROJECT/bin/fm-operational-input.sh"

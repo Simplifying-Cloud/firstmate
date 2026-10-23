@@ -34,21 +34,22 @@ The live Herdr guard is `FM_HERDR_SUBMIT_CONFIRM_LIVE=1 ../../../tests/fm-herdr-
 
 ## Primary integration
 
-The primary integration was verified on 2026-07-08 with OpenCode 1.17.6.
-`.opencode/plugins/fm-primary-turnend-guard.js` listens for `session.idle`.
-Throwing from `session.idle` does not block `opencode run`, so the primary adapter treats the event as passive and uses `client.session.promptAsync` to force one follow-up turn when `../../../bin/fm-turnend-guard.sh` returns 2.
-The follow-up was verified in the interactive TUI.
+The 1.x primary integration was verified on 2026-07-08 with OpenCode 1.17.6; the plugins under `.opencode/plugins/` were then ported to the 2.x plugin API (default-export `{ id, setup(ctx) }`) after the 2.1.4 upgrade, with the transport differences verified live on 2.1.4 (2026-10-23) as noted inline.
+`.opencode/plugins/fm-primary-turnend-guard.js` listens for the `session.execution` close set (`succeeded`, `failed`, `interrupted`): 2.x never publishes the legacy `session.idle`/`session.status` bus events (re-verified on 2.1.4, first verified on 2.0.32), so those events are the turn boundary, and the one-follow-up guard became per session because one plugin instance serves every session at its location.
+The primary adapter treats the close as passive and uses `ctx.session.prompt` (the 2.x form of `client.session.promptAsync`; verified live on 2.1.4: an admitted plugin prompt drives a follow-up execution in the same session) to force one bounded follow-up when `../../../bin/fm-turnend-guard.sh` returns 2.
 In a home with `config/supervision-host` and no `config/supervision-host-off` the watch-arm plugin spawns the supervision host instead of `../../../bin/fm-watch-arm.sh`, with Claude's print mode as its headless engine; [`supervision-host.md`](../../../../../docs/supervision-host.md) owns the host.
 `opencode run` can exit before displaying a queued follow-up, so the adapter steps aside in headless mode.
 On native Windows, the operational-input adapter runs its Bash helper through `bash`; macOS and Linux invoke it directly.
+The bash tool is named `shell` on 2.x and its input carries the command as `input.command` (verified 2.1.4); the V1 hook read `tool === "bash"` and `output.args.command`.
+One 2.x server hosts sessions from many directories and every location plugin receives every hosted session's events and tool calls, so each primary plugin acts only on top-level sessions at its own root (`lib/fm-session-scope.js`, session directory read through `ctx.session.get` because the execution events carry no location).
 
-The companion `.opencode/plugins/fm-primary-watch-arm.js` owns normal TUI watcher supervision, wakes it with `client.session.promptAsync`, and coordinates with the guard before a blind-turn follow-up.
-The PreToolUse-equivalent watcher-arm seatbelt blocks by throwing from `tool.execute.before`.
+The companion `.opencode/plugins/fm-primary-watch-arm.js` owns normal TUI watcher supervision, wakes it with `ctx.session.prompt`, and coordinates with the guard before a blind-turn follow-up through the unchanged globalThis coordinator handshake.
+The PreToolUse-equivalent watcher-arm seatbelt blocks by throwing from `ctx.tool.hook("execute.before")`, and the thrown message surfaces as the failed tool result (verified live on 2.1.4).
 
 ## OpenCode 2.x (harness `opencode2`)
 
-Verified live on 2026-10-17 against `opencode v2.0.32` (installed as `~/.local/bin/opencode` and `~/.local/bin/opencode2`, PATH-shadowed by a 1.18.31 `~/.opencode/bin/opencode`), with config isolation re-verified on 2026-10-19.
-`opencode2` is a CREWMATE and SCOUT adapter only: no 2.x primary supervision integration is verified, so a secondmate on it is refused, and `bin/fm-harness.sh` detection still answers the `opencode` family for both majors because the 2.x process comm is `opencode` too.
+Verified live on 2026-10-17 against `opencode v2.0.32` (installed as `~/.local/bin/opencode` and `~/.local/bin/opencode2`, PATH-shadowed by a 1.18.31 `~/.opencode/bin/opencode`), with config isolation re-verified on 2026-10-19 and the 2.1.4 upgrade verified on 2026-10-23 (2.1.4 now owns `~/.local/bin/opencode`; the 1.x install is gone).
+`opencode2` is a CREWMATE and SCOUT adapter only: the 2.x primary plugin layer (the ported `.opencode/plugins/` default-export plugins) is live-verified on 2.1.4 for plugin loading, tool-guard blocking, and one follow-up prompt in headless sessions, but full TUI watcher continuity has not been re-verified end to end on 2.x, so a secondmate on it is still refused, and `bin/fm-harness.sh` detection still answers the `opencode` family for both majors because the 2.x process comm is `opencode` too.
 
 | Fact | Value |
 |---|---|

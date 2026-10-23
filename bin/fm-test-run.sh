@@ -304,6 +304,7 @@ family_for_basename() {
     fm-timeout-lib.test.sh|\
     fm-tmux-submit-busy.test.sh|fm-trace-context-lib.test.sh|\
     fm-transition-lib.test.sh|\
+    fm-opencode-primary-plugins.test.sh|\
     fm-test-run.test.sh|fm-test-isolation-proof.test.sh)
       printf '%s\n' pure-contract-unit
       ;;
@@ -369,7 +370,7 @@ family_for_basename() {
     fm-herdr-version-floor-live-e2e.test.sh|\
     fm-herdr-pi-stale-registration-live-e2e.test.sh|\
     fm-worker-account-live-e2e.test.sh|\
-    fm-opencode-primary-live-e2e.test.sh|fm-opencode2-signals-live-e2e.test.sh|fm-opencode2-isolation-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
+    fm-opencode-primary-live-e2e.test.sh|fm-opencode2-signals-live-e2e.test.sh|fm-opencode2-isolation-live-e2e.test.sh|fm-opencode2-primary-plugins-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
     fm-pi-branch-responsiveness-live-e2e.test.sh|\
     fm-pi-primary-live-e2e.test.sh|fm-pi-start-live-e2e.test.sh|fm-pi-codex-native.test.sh|fm-omp-primary-live-e2e.test.sh|\
     fm-pr-state-live-e2e.test.sh|\
@@ -786,9 +787,11 @@ tests/fm-no-mistakes-required.test.sh 270
 tests/fm-omp-harness.test.sh 63796
 tests/fm-opencode2-harness.test.sh 25000
 tests/fm-opencode2-signals-live-e2e.test.sh 45000
+tests/fm-opencode2-primary-plugins-live-e2e.test.sh 45000
 tests/fm-omp-primary-live-e2e.test.sh 74
 tests/fm-on.test.sh 11473
 tests/fm-opencode-primary-live-e2e.test.sh 47
+tests/fm-opencode-primary-plugins.test.sh 120
 tests/fm-operational-input.test.sh 2404
 tests/fm-peek-remote.test.sh 1082
 tests/fm-pending-reply.test.sh 41090

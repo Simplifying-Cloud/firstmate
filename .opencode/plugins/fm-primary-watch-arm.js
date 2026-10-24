@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { createSessionScope } from "./lib/fm-session-scope.js";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
@@ -129,11 +129,41 @@ function effectivePaths(root) {
   return { root: fmRoot, home: fmHome, state, config };
 }
 
+// The id a genuine .fm-secondmate-home marker names at $1, or "" when the
+// marker is absent or invalid. Mirrors fm_root_is_secondmate_home in
+// bin/fm-primary-scope-lib.sh: a symlink or non-regular file is invalid, and
+// the id must be nonempty after whitespace stripping and match
+// ^[A-Za-z0-9._-]+$ so it can never smuggle a path or newline.
+function secondmateMarkerId(root) {
+  const marker = `${root}/.fm-secondmate-home`;
+  let stats;
+  try {
+    stats = lstatSync(marker);
+  } catch {
+    return "";
+  }
+  if (stats.isSymbolicLink() || !stats.isFile()) return "";
+  let id;
+  try {
+    id = readFileSync(marker, "utf8").replace(/\s+/g, "");
+  } catch {
+    return "";
+  }
+  return /^[A-Za-z0-9._-]+$/.test(id) ? id : "";
+}
+
 async function isPrimaryRoot(root, home) {
   if (!root) return false;
   if (!existsSync(`${root}/AGENTS.md`) || !existsSync(`${root}/bin`)) return false;
-  if (existsSync(`${root}/.fm-secondmate-home`)) return false;
-  if (home && home !== root && existsSync(`${home}/.fm-secondmate-home`)) return false;
+  // A genuine secondmate marker force-includes the root, mirroring
+  // fm_primary_root_matches in bin/fm-primary-scope-lib.sh: a secondmate home
+  // runs its OWN primary firstmate session and must arm exactly like the main
+  // checkout, whether it is a plain clone or a linked worktree. An invalid or
+  // absent marker falls through to the plain-checkout rule below.
+  if (secondmateMarkerId(root)) return true;
+  // A crewmate or scout worktree of a marked home stays silent even when the
+  // worktree itself is a plain checkout: only the home's own session arms.
+  if (home && home !== root && secondmateMarkerId(home)) return false;
   const gitDir = await runProcess("git", ["-C", root, "rev-parse", "--git-dir"]);
   const commonDir = await runProcess("git", ["-C", root, "rev-parse", "--git-common-dir"]);
   if (gitDir.code !== 0 || commonDir.code !== 0) return false;

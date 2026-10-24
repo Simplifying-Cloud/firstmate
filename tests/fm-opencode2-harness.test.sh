@@ -368,7 +368,7 @@ EOF
 }
 
 test_oc2_watch_arm_root_predicate() {
-  local base sm_home plain marked_root work_repo wt unmarked_wt arm_record
+  local base sm_home marked_root work_repo unmarked_wt arm_record
   base="$TMP_ROOT/oc2-watch-arm-roots"
   sm_home="$base/home"
   mkdir -p "$sm_home/state" "$base/rec"

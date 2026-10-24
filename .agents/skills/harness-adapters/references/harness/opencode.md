@@ -1,7 +1,7 @@
 # OpenCode
 
 Verified on 2026-06-11 across versions 1.15.7 through 1.17.6, with busy-queue behavior re-verified on 2026-07-20 using 1.18.4.
-`opencode2` (OpenCode 2.x, the separate @opencode/cli package) is verified on 2026-10-17 on 2.0.32 for crewmate and scout launches only; the "OpenCode 2.x" section below owns its differences.
+`opencode2` (OpenCode 2.x, the separate @opencode/cli package) is verified on 2026-10-17 on 2.0.32, with primary-harness supervision verified end to end on 2.1.4 on 2026-10-23 (crewmates, scouts, and secondmates); the "OpenCode 2.x" section below owns its differences.
 
 ## OpenCode 1.x operating facts
 
@@ -49,7 +49,7 @@ The PreToolUse-equivalent watcher-arm seatbelt blocks by throwing from `ctx.tool
 ## OpenCode 2.x (harness `opencode2`)
 
 Verified live on 2026-10-17 against `opencode v2.0.32` (installed as `~/.local/bin/opencode` and `~/.local/bin/opencode2`, PATH-shadowed by a 1.18.31 `~/.opencode/bin/opencode`), with config isolation re-verified on 2026-10-19 and the 2.1.4 upgrade verified on 2026-10-23 (2.1.4 now owns `~/.local/bin/opencode`; the 1.x install is gone).
-`opencode2` is a CREWMATE and SCOUT adapter only: the 2.x primary plugin layer (the ported `.opencode/plugins/` default-export plugins) is live-verified on 2.1.4 for plugin loading, tool-guard blocking, and one follow-up prompt in headless sessions, but full TUI watcher continuity has not been re-verified end to end on 2.x, so a secondmate on it is still refused, and `bin/fm-harness.sh` detection still answers the `opencode` family for both majors because the 2.x process comm is `opencode` too.
+`opencode2` is a verified CREWMATE, SCOUT, and SECONDMATE adapter: the ported `.opencode/plugins/` primary layer is live-verified on 2.1.4 (2026-10-23) in a real TUI session end to end - plugin loading, the session-start nudge delivered once, watch-arm arming the home's watcher after a turn closes, a status-file wake delivered back as the operational-input follow-up prompt with successor continuity, and the turn-end guard blocking exactly one blind turn without double-firing ([`docs/verification/supervision.md`](../../../../../docs/verification/supervision.md) owns the evidence) - so a secondmate may run on it, and `bin/fm-harness.sh` detection still answers the `opencode` family for both majors because the 2.x process comm is `opencode` too.
 
 | Fact | Value |
 |---|---|

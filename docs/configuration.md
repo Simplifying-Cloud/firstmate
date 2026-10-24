@@ -929,7 +929,7 @@ Those inherited values are defaults and rules only; `fm-spawn` still permits a c
 
 ### OpenCode 2.x workers
 
-Select `opencode2` for OpenCode 2.x crewmates and scouts restricted to `https://ai.simplifying.cloud`; the [adapter reference](../.agents/skills/harness-adapters/references/harness/opencode.md#opencode-2x-harness-opencode2) owns the platform-only traffic contract and verified operating limits.
+Select `opencode2` for OpenCode 2.x crewmates, scouts, and secondmates restricted to `https://ai.simplifying.cloud`; the [adapter reference](../.agents/skills/harness-adapters/references/harness/opencode.md#opencode-2x-harness-opencode2) owns the platform-only traffic contract and verified operating limits.
 [`fm-opencode2-lib.sh`](../bin/fm-opencode2-lib.sh) owns binary selection, provider discovery, and the per-task isolated config directory.
 
 ### Installed hooks and launch details

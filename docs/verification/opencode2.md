@@ -1,14 +1,15 @@
-# Verification: the OpenCode 2.x (`opencode2`) crewmate adapter
+# Verification: the OpenCode 2.x (`opencode2`) adapter
 
 Active empirical evidence for firstmate's OpenCode 2.x worker adapter.
 The operating facts live in [`.agents/skills/harness-adapters/references/harness/opencode.md`](../../.agents/skills/harness-adapters/references/harness/opencode.md); this record owns how they were established and what is still unproven.
+The 2.x primary-harness supervision verification (nudge, watcher arm, wake delivery, turn-end guard) lives in [`supervision.md`](supervision.md#opencode-2x-primary-plugin-supervision-2026-10-23).
 
 ## Subject
 
 | Field | Value |
 |---|---|
 | Version | `opencode v2.0.32` (`@opencode/cli`), PATH-shadowed by `opencode 1.18.31` (`~/.opencode/bin/opencode`) |
-| Verified | 2026-10-17; config isolation 2026-10-19; shared-server confinement 2026-10-22 |
+| Verified | 2026-10-17; config isolation 2026-10-19; shared-server confinement 2026-10-22; primary supervision on 2.1.4 2026-10-23 |
 | Platform | Linux x86_64, Herdr 0.9.1 lab session for TUI driving, tmux for the live guard |
 | Binary | `~/.local/bin/opencode` and `~/.local/bin/opencode2` (both symlinked to the same 2.x executable) |
 | Platform origin | `https://ai.simplifying.cloud` (org config from its `/.well-known/opencode` manifest) |
@@ -138,7 +139,6 @@ Both live guards are token-free and run by default wherever their tools are inst
 
 ## Not verified
 
-- No full 2.x primary supervision integration: the ported default-export `.opencode/plugins/` are live-verified on 2.1.4 (2026-10-23; `bin/fm-test-run.sh tests/fm-opencode2-primary-plugins-live-e2e.test.sh`) for plugin loading, tool-guard blocking, and one follow-up prompt in headless sessions, but full TUI watcher continuity has not been re-verified end to end on 2.x, which is why a secondmate on `opencode2` is still refused.
 - No sandbox placement: a sandbox host has none of the operator's OpenCode 2.x platform sign-in, so the org providers cannot resolve there.
 - No effort mapping: no platform model exposes a variant list on 2.0.32, so the record-and-omit posture is untestable beyond its omission.
 - No OpenCode Console sign-in: the 2.0.32 source loads a signed-in Console account's MCP servers and policies from the credential store, outside any config dir, and registers those MCP servers ahead of config-defined ones, but no Console connection exists here to exercise it.

@@ -506,6 +506,59 @@ The timeout hook trapped `TERM`, backgrounded `sleep 300`, waited, and on `TERM`
 | Control, exit 2 before the timeout | started +2, exited 2 at +12 | `Stop hook feedback` followed by the requested reply |
 | Timeout, exit 2 from the `TERM` handler | started +2, `TERM` and exit 2 at +32 | no `Stop hook feedback` and no reply, still idle at +111 |
 
+## OpenCode 2.x primary plugin supervision, 2026-10-23
+
+End-to-end live verification that the ported OpenCode 2.x `.opencode/plugins/` deliver full primary-harness supervision in a real TUI session, run against the merged head `11a2b7e240ad365f9036cf4078259302c31f7570` of PR #36.
+This record supports the AGENTS.md section 4 harness list, the OpenCode 2.x adapter reference, and the `opencode2` secondmate boundary decision recorded in [`opencode2.md`](opencode2.md).
+
+Environment: `opencode v2.1.4` (`~/.local/bin/opencode2`), Linux x86_64, tmux 3.6 on a dedicated throwaway socket, a disposable `git clone` of the merged head as the session root (a plain clone is a genuine primary root; the watch-arm plugin's `isPrimaryRoot` keeps a linked worktree correctly silent), and a scratch `FM_HOME` holding only a synthetic `state/verify-task.meta`, `state/verify-task.status`, and `config/` without `x-mode.env`.
+The TUI ran `--standalone` with `OPENCODE_CONFIG_DIR` at a directory holding only `{"disabled":true}` `service.json` and `OPENCODE_CONFIG_CONTENT` pointing every request at a localhost Anthropic-compatible mock, so no model tokens were spent and no operator server was joined.
+`FM_POLL=3` shortened the watcher's poll cycle; every other script and plugin byte was the merged tree unchanged.
+The mock answers with scripted text or one `shell` tool call, and logs every request body, so each delivery claim below keys off the newest user message the real session actually sent.
+
+Observed, in order:
+
+- All five ported plugins loaded in both TUI sessions with zero `failed to load plugin` lines in the shared server log for the run window.
+  The log printed one `loading plugin` line per plugin per session, each keyed to the clone's `.opencode/plugins/` path.
+- The session-start nudge fired exactly once for the fresh session.
+  The 2.1.4 TUI creates its session lazily on the first submitted prompt rather than at process start, so the nudge arrived as the operational-input prompt queued behind that first turn, was delivered at its close, and drove a follow-up execution in the same session.
+  The scripted turn then ran the real `bin/fm-lock.sh` through the session's `shell` tool, which printed `lock acquired: harness pid 678557`, anchoring the scratch home's `state/.lock` to the `opencode` TUI process.
+  Exactly one request in the whole session carried the nudge as its newest user message:
+
+```text
+⁣FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other instructions.
+```
+
+- After that turn closed, the watch-arm plugin armed the scratch home's watcher without any model tool call.
+  The scratch home's `state/.watch.lock/pid` named a live `bash .../clone/bin/fm-watch.sh` process and `state/.last-watcher-beat` refreshed every poll cycle, roughly one second after the turn close; the session lock, watcher lock, and beacon all lived under the scratch `FM_HOME`, and the live primary home's records were never touched.
+- A wake against the scratch home was delivered back into the session as the operational-input follow-up prompt, twice.
+  First an empty no-verb `verify-task.status` surfaced on the watcher's own poll as `reason=actionable-signal`; then a synthetic captain-relevant line appended to that file (`needs-decision [at=...]: synthetic captain-relevant wake probe...`) surfaced about 34 seconds after injection.
+  Each cycle exit record shows the arm restoring a successor watcher (`successor=started:<pid>`) before delivery, and each delivery arrived as the newest user message:
+
+```text
+⁣FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned.
+
+signal: /tmp/.../verify/fm-home/state/verify-task.status
+```
+
+- While the lock was owned and the watcher armed, no turn-end-guard follow-up appeared at all: the guard plugin's coordinator consult with the armed watch-arm correctly skipped the guard at every close of the supervised session.
+- The turn-end guard blocked exactly one blind turn-end and did not double-fire.
+  After the supervised session was torn down (TUI, watcher, and lock owner all dead, the synthetic `.meta` kept so supervision stayed needed), a second TUI relaunched with `--continue --prompt`, which resumed the same session id without a new `session.created` (so no second nudge) and auto-submitted the prompt.
+  That session did not own the dead lock, so the watch-arm plugin stood down read-only and the real `bin/fm-turnend-guard.sh` exited 2 once, delivering exactly one follow-up whose newest user message began:
+
+```text
+⁣FIRSTMATE_OP: v1 turn-end-guard: TURN WOULD END BLIND - supervision is off. ...
+●  TURN WOULD END BLIND - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher holds this home lock (last beat: 35s ago).
+●  repair missing watcher supervision by letting the OpenCode TUI plugin arm after idle; ...
+```
+
+  The follow-up turn completed, and after a 12-second settle window the request log still held exactly one guard prompt and no further turn, so the follow-up's own close was skipped and no second block fired.
+- The PreToolUse seatbelts stayed live in the same sessions: a scripted top-level `cd <clone> && bash bin/fm-lock.sh` tool call was denied by the cd-guard with `[persistent-cd] a persistent top-level directory change in the primary firstmate checkout is blocked`, surfacing as the failed tool result, and the watcher-arm seatbelt denied a broad `pkill` and a redirected or wrapped `fm-watch-arm.sh` invocation (`[broad-watcher-kill]`, `[watcher-redirection]`, `[watcher-nested]`) issued from the verification driver.
+
+Every item passed, which is the evidence that lifted the `opencode2` crewmate/scout-only boundary; the adapter facts are in [`opencode2.md`](opencode2.md) and the harness reference's OpenCode 2.x section.
+The token-free portable guard for the plugin layer remains `bin/fm-test-run.sh tests/fm-opencode2-primary-plugins-live-e2e.test.sh`; rerun it, and this record's scenario, after every OpenCode upgrade before trusting primary supervision on 2.x.
+
 ## Watcher continuity
 
 The cross-harness evidence combines the 2026-07-17 live pass with Claude's replacement Stop-owned path revalidated on 2026-09-21, all against isolated project and home state.

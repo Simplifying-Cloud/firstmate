@@ -18,8 +18,10 @@
 #      from session.execution events with the same latch scoping as 1.x: a
 #      child session's completion never clears the worker, an interrupt
 #      closes the turn, and the settle touch stays a notification.
-#   5. opencode2 is a crewmate/scout adapter only: a secondmate launch is
-#      refused.
+#   5. opencode2 is verified for primary-harness supervision end to end
+#      (2026-10-23, docs/verification/supervision.md "OpenCode 2.x primary
+#      plugin supervision"): a secondmate launch is allowed, and the control
+#      plane accepts the secondmate kind.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -271,20 +273,37 @@ test_oc2_model_outside_the_platform_refuses() {
   pass "opencode2 refuses a model outside the discovered platform providers"
 }
 
-test_oc2_secondmate_is_refused() {
-  local rec id=oc2-secondmate out home fakebin
+test_oc2_secondmate_is_allowed() {
+  local rec id=oc2-secondmate out sm_home meta
   rec=$(make_oc2_spawn_case secondmate "$id")
   read_oc2_spawn_record "$rec"
+  # A minimal seeded secondmate home (bin/fm-spawn.sh's
+  # validate_firstmate_home_for_spawn needs the marker, AGENTS.md, bin/, and a
+  # charter); the active primary home stays the fixture home, as in a real
+  # secondmate provisioning flow.
+  sm_home="$CASE_DIR/sm-home"
+  mkdir -p "$sm_home/bin" "$sm_home/data"
+  printf '# Firstmate\n' >"$sm_home/AGENTS.md"
+  printf '%s\n' "$id" >"$sm_home/.fm-secondmate-home"
+  printf 'charter\n' >"$sm_home/data/charter.md"
+  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' >"$sm_home/.gitignore"
+  git -C "$sm_home" init -q -b main
   out=$(HOME="$HOME_DIR/user-home" FM_ROOT_OVERRIDE='' FM_HOME="$HOME_DIR" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$WT_DIR" TMUX="fake,1,0" \
     FM_FAKE_OC2_DEBUG_CONFIG="$CASE_DIR/debug-config.json" \
     PATH="$FAKEBIN_DIR:$BASE_PATH" \
-    "$ROOT/bin/fm-spawn.sh" "$id" "$HOME_DIR" --secondmate 2>&1)
-  expect_code 1 "$?" "an opencode2 secondmate must refuse"
-  assert_contains "$out" "cannot run a secondmate" "refusal must state the crewmate-only boundary"
-  pass "opencode2 refuses secondmate launches"
+    "$ROOT/bin/fm-spawn.sh" "$id" "$sm_home" --secondmate 2>&1)
+  expect_code 0 "$?" "an opencode2 secondmate must be allowed past the lifted primary-supervision boundary: $out"
+  assert_not_contains "$out" "cannot run a secondmate" "the lifted boundary must not refuse the launch"
+  meta="$HOME_DIR/state/$id.meta"
+  [ -f "$meta" ] || fail "the opencode2 secondmate spawn wrote no meta"
+  [ "$(sed -n 's/^harness=//p' "$meta")" = opencode2 ] \
+    || fail "secondmate meta must record harness=opencode2"
+  [ "$(sed -n 's/^kind=//p' "$meta")" = secondmate ] \
+    || fail "secondmate meta must record kind=secondmate"
+  pass "opencode2 allows secondmate launches"
 }
 
 # drive_oc2_plugin <plugin-path> <state-dir> <id> <events-json...>: load the
@@ -465,7 +484,7 @@ test_oc2_control_mechanics_are_the_verified_ones() {
   [ "$(fm_control_interrupt_press_gap opencode2)" = 0.5 ] || fail "armed presses must keep the verified gap"
   fm_control_harness_supports_kind opencode2 ship || fail "ship must be supported"
   fm_control_harness_supports_kind opencode2 scout || fail "scout must be supported"
-  fm_control_harness_supports_kind opencode2 secondmate && fail "secondmate must be refused" || true
+  fm_control_harness_supports_kind opencode2 secondmate || fail "secondmate must be supported after the 2026-10-23 primary-supervision verification"
   out=$(fm_control_harness_wiring_paths opencode2 /wt /state task1)
   printf '%s\n' "$out" | grep -Fqx '/wt/.opencode/plugins/fm-busy-state.js' || fail "wiring must include the plugin"
   printf '%s\n' "$out" | grep -Fqx '/state/task1.opencode-config' || fail "wiring must include the isolated config dir"
@@ -480,7 +499,7 @@ test_oc2_binary_resolution_refuses_without_2x \
   &&
   test_oc2_model_outside_the_platform_refuses \
   &&
-  test_oc2_secondmate_is_refused \
+  test_oc2_secondmate_is_allowed \
   &&
   test_oc2_plugin_classifies_from_execution_events \
   &&

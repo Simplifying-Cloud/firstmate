@@ -4,7 +4,9 @@
 # directory, and the launch-config JSON fragments that make every worker model
 # request go through the governed platform.
 # Usage: . bin/fm-opencode2-lib.sh
-# The opencode2 adapter is verified for crewmate and scout launches only
+# The opencode2 adapter is verified for primary-harness supervision end to end
+# on 2.1.4 (2026-10-23, docs/verification/supervision.md "OpenCode 2.x primary
+# plugin supervision"), so crewmates, scouts, and secondmates may run on it
 # (.agents/skills/harness-adapters/references/harness/opencode.md owns the
 # operating facts; AGENTS.md section 4 owns the verified list). Every helper
 # here fails closed: a binary that cannot be proven to be 2.x, a platform

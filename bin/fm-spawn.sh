@@ -3228,16 +3228,11 @@ if [ "$KIND" = secondmate ] && [ "$HARNESS" = rovo ]; then
   exit 1
 fi
 
-# opencode2 still carries a primary-supervision gap: the tracked
-# .opencode/plugins are ported to the 2.x default-export form and
-# live-verified on 2.1.4 for loading, tool-guard blocking, and one follow-up
-# prompt, but full TUI watcher continuity is not verified end to end on 2.x -
-# so an opencode2 secondmate could never be trusted to keep its watch cycle
-# armed.
-if [ "$KIND" = secondmate ] && [ "$HARNESS" = opencode2 ]; then
-  echo "error: opencode2 is a verified crewmate/scout adapter only and cannot run a secondmate; its 2.x primary supervision integration is not verified. Select a harness verified for secondmates." >&2
-  exit 1
-fi
+# opencode2's primary supervision is verified end to end (2026-10-23,
+# docs/verification/supervision.md "OpenCode 2.x primary plugin supervision"):
+# watcher arming, wake delivery, the turn-end guard, and the session-start
+# nudge all passed in a live 2.1.4 TUI, so a secondmate may run on it like any
+# verified primary harness.
 
 case "$HARNESS" in
 devin)
@@ -6029,7 +6024,15 @@ opencode2)
   fm_opencode2_isolate_config_dir "$OC2_CFG_DIR" || exit 1
   LAUNCH=${LAUNCH//__OC2BIN__/"$(shell_quote "$OC2_BIN")"}
   LAUNCH=${LAUNCH//__OC2CFGDIR__/"$(shell_quote "$OC2_CFG_DIR")"}
-  LAUNCH=${LAUNCH//__OC2SESSION__/"$(shell_quote "$OC2_SESSION_ID")"}
+  if [ "$KIND" = secondmate ]; then
+    # A secondmate runs its own primary session and carries no semantic
+    # busy wiring (the KIND-gated arming above), so there is no
+    # Firstmate-minted session id to pin: launch without --session and let
+    # the TUI own its session identity, like every other secondmate adapter.
+    LAUNCH=${LAUNCH//' --session __OC2SESSION__'/}
+  else
+    LAUNCH=${LAUNCH//__OC2SESSION__/"$(shell_quote "$OC2_SESSION_ID")"}
+  fi
   LAUNCH=${LAUNCH//__OC2POLICIES__/$OC2_POLICIES}
   LAUNCH=${LAUNCH//__OC2MODEL__/${OC2_MODEL:-}}
   ;;

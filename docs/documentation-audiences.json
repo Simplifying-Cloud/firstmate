@@ -587,6 +587,74 @@
     {
       "path": ".agents/skills/validation-supervision/SKILL.md",
       "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/security-audit-dispatch/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": "skills/security-audit/SKILL.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/PROVENANCE.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/RECONNAISSANCE.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/HUNTING.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/VALIDATION-AND-REPORTING.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/ATTACK-CLASSES.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/AI-AND-LLM.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/WEB-PROTOCOL-AND-AUTH.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/CLIENT-SIDE.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/CLOUD-AND-DEPLOYMENT.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/PROTOCOLS-RPC-AND-MESSAGING.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/DATA-ISOLATION-AND-LIFECYCLE.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/MEMORY-SAFETY-AND-BINARY.md",
+      "audience": "public-product"
+    },
+    {
+      "path": "skills/security-audit/SUPPLY-CHAIN-AND-RELEASE.md",
+      "audience": "public-product"
     }
   ]
 }

@@ -15,6 +15,8 @@ metadata:
 A security audit is a scout task under section 7 of `AGENTS.md`, never a ship and never a PR.
 The deliverable is the audit itself: the worker runs the vendored skill with its output directory pinned under the dispatching home's `data/<task-id>/` tree (for example `data/<task-id>/security-audit/`), and the scout report points at the skill's `REPORT.md`, `findings.json`, and coverage ledger there.
 
+Audit placement must be local: a remote-sandbox placement is refused for audits until a later change defines how the pinned skill reaches the sandbox and how `findings.json` and the coverage ledger come back to the supervising home.
+
 ## Pointing the worker at the skill
 
 The skill is vendored, pinned, and read-only at `skills/security-audit/` in this repository's checkout (`PROVENANCE.md` there owns the pinned commit and deliberate-update procedure).

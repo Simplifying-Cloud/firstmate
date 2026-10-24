@@ -1,14 +1,15 @@
-# Verification: the OpenCode 2.x (`opencode2`) crewmate adapter
+# Verification: the OpenCode 2.x (`opencode2`) adapter
 
 Active empirical evidence for firstmate's OpenCode 2.x worker adapter.
 The operating facts live in [`.agents/skills/harness-adapters/references/harness/opencode.md`](../../.agents/skills/harness-adapters/references/harness/opencode.md); this record owns how they were established and what is still unproven.
+The 2.x primary-harness supervision verification (nudge, watcher arm, wake delivery, turn-end guard) lives in [`supervision.md`](supervision.md#opencode-2x-primary-plugin-supervision-2026-10-23).
 
 ## Subject
 
 | Field | Value |
 |---|---|
 | Version | `opencode v2.0.32` (`@opencode/cli`), PATH-shadowed by `opencode 1.18.31` (`~/.opencode/bin/opencode`) |
-| Verified | 2026-10-17; config isolation 2026-10-19; shared-server confinement 2026-10-22 |
+| Verified | 2026-10-17; config isolation 2026-10-19; shared-server confinement 2026-10-22; primary supervision on 2.1.4 2026-10-23 |
 | Platform | Linux x86_64, Herdr 0.9.1 lab session for TUI driving, tmux for the live guard |
 | Binary | `~/.local/bin/opencode` and `~/.local/bin/opencode2` (both symlinked to the same 2.x executable) |
 | Platform origin | `https://ai.simplifying.cloud` (org config from its `/.well-known/opencode` manifest) |
@@ -119,12 +120,14 @@ FM_OPENCODE2_SIGNALS_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-signals-live-e
 FM_OPENCODE2_ISOLATION_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-isolation-live-e2e.test.sh
 ```
 
-Observed output on 2026-10-22:
+Observed output on 2026-10-22; the secondmate and watch-arm rows come from the 2026-10-23/24 verification pass ([`supervision.md`](supervision.md#opencode-2x-primary-plugin-supervision-2026-10-23)):
 
 ```text
 ok - opencode2 launch is standalone, config-isolated, and platform-only
 ok - opencode2 worker gets a per-task OPENCODE_CONFIG_DIR that keeps OpenCode off the operator's shared background server
 ok - opencode2 refuses a model outside the discovered platform providers
+ok - opencode2 allows secondmate launches
+ok - opencode2 watch-arm arms a marked secondmate home and stays silent in crew worktrees
 ok - opencode2 plugin classifies from session.execution events, scoped to the latched worker session
 ok - an opencode2 plugin in a shared server ignores foreign-directory sessions
 ok - an opencode2 settle racing teardown cannot resurrect task records
@@ -133,12 +136,11 @@ ok - opencode2 opencode v2.0.32 live: standalone TUI turn drove the generated pl
 ok - opencode2 opencode v2.0.32 live: two workers on one shared background server kept each task busy record and turn-ended notification confined to its own worktree
 ```
 
-The portable suite pins binary selection, the platform-only launch line, the worker environment's isolated config dir and its service setting (by running the staged launch line against a fake 2.x binary), model refusals, the secondmate refusal, persistence and launch of the pinned session id, rejection of a competing session even in the same worktree, the pinned session's busy->idle and notification touch, the teardown-racing settle refusal, and the control tables against fake binaries.
+The portable suite pins binary selection, the platform-only launch line, the worker environment's isolated config dir and its service setting (by running the staged launch line against a fake 2.x binary), model refusals, the allowed secondmate launch with its session-pin-free launch line, the watch-arm root predicate for marked secondmate homes and crew worktrees, persistence and launch of the pinned session id, rejection of a competing session even in the same worktree, the pinned session's busy->idle and notification touch, the teardown-racing settle refusal, and the control tables against fake binaries.
 Both live guards are token-free and run by default wherever their tools are installed, capability-skipping elsewhere: the signals guard needs `opencode2`, `tmux`, `python3`, `node`, and `curl` and drives the TUI against a localhost mock, and the isolation guard needs `opencode2` and `python3` and runs the real binary against a stand-in operator under the XDG directories, with each isolated verdict paired with a control run that must see the stand-in operator's config.
 
 ## Not verified
 
-- No full 2.x primary supervision integration: the ported default-export `.opencode/plugins/` are live-verified on 2.1.4 (2026-10-23; `bin/fm-test-run.sh tests/fm-opencode2-primary-plugins-live-e2e.test.sh`) for plugin loading, tool-guard blocking, and one follow-up prompt in headless sessions, but full TUI watcher continuity has not been re-verified end to end on 2.x, which is why a secondmate on `opencode2` is still refused.
 - No sandbox placement: a sandbox host has none of the operator's OpenCode 2.x platform sign-in, so the org providers cannot resolve there.
 - No effort mapping: no platform model exposes a variant list on 2.0.32, so the record-and-omit posture is untestable beyond its omission.
 - No OpenCode Console sign-in: the 2.0.32 source loads a signed-in Console account's MCP servers and policies from the credential store, outside any config dir, and registers those MCP servers ahead of config-defined ones, but no Console connection exists here to exercise it.

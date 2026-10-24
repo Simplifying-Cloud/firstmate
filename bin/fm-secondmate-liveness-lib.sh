@@ -260,8 +260,11 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   target=$(fm_backend_target_of_meta "$meta")
   [ -n "$target" ] || target="$window"
   agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
+  # opencode2 joined the recovery-verified set on 2026-10-23: its dead-endpoint
+  # classifier verdict and watcher-tick respawn are live-verified in
+  # docs/verification/supervision.md "OpenCode 2.x primary plugin supervision".
   case "$harness" in
-    claude|codex|opencode|pi|pi-signed|grok|kimi|omp) ;;
+    claude|codex|opencode|opencode2|pi|pi-signed|grok|kimi|omp) ;;
     *)
       case "$agent_state" in dead|missing) agent_state=unverified-harness ;; esac
       ;;

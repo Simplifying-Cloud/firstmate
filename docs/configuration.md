@@ -855,7 +855,7 @@ A local standalone-clone home cannot receive a primary-local commit through that
 
 ## Harness support
 
-claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, and omp are empirically verified for crewmate and secondmate launches; gemini is verified for crewmate and scout launches only, and [README requirements](../README.md#requirements) own the set supported for the primary session.
+claude, codex, opencode, opencode2, pi, pi-signed, grok, kimi, cursor, and omp are empirically verified for crewmate and secondmate launches; gemini is verified for crewmate and scout launches only, and [README requirements](../README.md#requirements) own the set supported for the primary session.
 
 ### Harness restrictions and credentials
 
@@ -929,7 +929,7 @@ Those inherited values are defaults and rules only; `fm-spawn` still permits a c
 
 ### OpenCode 2.x workers
 
-Select `opencode2` for OpenCode 2.x crewmates and scouts restricted to `https://ai.simplifying.cloud`; the [adapter reference](../.agents/skills/harness-adapters/references/harness/opencode.md#opencode-2x-harness-opencode2) owns the platform-only traffic contract and verified operating limits.
+Select `opencode2` for OpenCode 2.x crewmates, scouts, and secondmates restricted to `https://ai.simplifying.cloud`; the [adapter reference](../.agents/skills/harness-adapters/references/harness/opencode.md#opencode-2x-harness-opencode2) owns the platform-only traffic contract and verified operating limits.
 [`fm-opencode2-lib.sh`](../bin/fm-opencode2-lib.sh) owns binary selection, provider discovery, and the per-task isolated config directory.
 
 ### Installed hooks and launch details

@@ -75,7 +75,7 @@ Pick whichever one matches your subscription and workflow.
 Oh My Pi (`omp`), a Pi fork, is verified as a primary with the same extension-owned watcher model as Pi and a stronger turn-end guard: its blocking `session_stop` hook compels a continuation instead of requesting one.
 Codex and OpenCode are also verified and supported as primary harnesses; Codex uses bounded foreground checkpoints, and OpenCode uses a TUI plugin, so both carry more harness-specific supervision tradeoffs than the three co-primaries.
 OpenCode 1.x was fully verified historically but is no longer installable.
-The OpenCode 2.x primary plugins are live-verified on 2.1.4 for plugin loading, tool-guard blocking, and one follow-up prompt in headless sessions, with full TUI watcher continuity still pending.
+The OpenCode 2.x primary plugins are live-verified on 2.1.4 in a real TUI session end to end - plugin loading, the session-start nudge, watcher arming, wake delivery, and the turn-end guard - so OpenCode 2.x is a verified primary harness and may also run secondmates.
 Cursor Agent CLI is verified as a primary too, using a tracked project-scope `.cursor/hooks.json` whose `stop` hook parks on the watcher between turns, closest in shape to Claude Code's.
 Launch it with `--trust`, or none of its project hooks load; it also has no turn-end hook in headless `cursor-agent -p`, so run the primary session interactively.
 

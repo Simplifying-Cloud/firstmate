@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Behavior tests for the verified OpenCode 2.x crewmate/scout adapter.
+# Behavior tests for the verified OpenCode 2.x adapter (crewmates, scouts, and
+# secondmates).
 #
 # The facts pinned here are the ones a wrong guess would make dangerous:
 #   1. The 2.x binary is selected without PATH-order dependence: detection
@@ -18,8 +19,10 @@
 #      from session.execution events with the same latch scoping as 1.x: a
 #      child session's completion never clears the worker, an interrupt
 #      closes the turn, and the settle touch stays a notification.
-#   5. opencode2 is a crewmate/scout adapter only: a secondmate launch is
-#      refused.
+#   5. opencode2 is verified for primary-harness supervision end to end
+#      (2026-10-23, docs/verification/supervision.md "OpenCode 2.x primary
+#      plugin supervision"): a secondmate launch is allowed, and the control
+#      plane accepts the secondmate kind.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -271,20 +274,153 @@ test_oc2_model_outside_the_platform_refuses() {
   pass "opencode2 refuses a model outside the discovered platform providers"
 }
 
-test_oc2_secondmate_is_refused() {
-  local rec id=oc2-secondmate out home fakebin
+test_oc2_secondmate_is_allowed() {
+  local rec id=oc2-secondmate out sm_home meta
   rec=$(make_oc2_spawn_case secondmate "$id")
   read_oc2_spawn_record "$rec"
+  # A minimal seeded secondmate home (bin/fm-spawn.sh's
+  # validate_firstmate_home_for_spawn needs the marker, AGENTS.md, bin/, and a
+  # charter); the active primary home stays the fixture home, as in a real
+  # secondmate provisioning flow.
+  sm_home="$CASE_DIR/sm-home"
+  mkdir -p "$sm_home/bin" "$sm_home/data"
+  printf '# Firstmate\n' >"$sm_home/AGENTS.md"
+  printf '%s\n' "$id" >"$sm_home/.fm-secondmate-home"
+  printf 'charter\n' >"$sm_home/data/charter.md"
+  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' >"$sm_home/.gitignore"
+  git -C "$sm_home" init -q -b main
   out=$(HOME="$HOME_DIR/user-home" FM_ROOT_OVERRIDE='' FM_HOME="$HOME_DIR" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$WT_DIR" TMUX="fake,1,0" \
     FM_FAKE_OC2_DEBUG_CONFIG="$CASE_DIR/debug-config.json" \
+    FM_FAKE_LAUNCH_LOG="$CASE_DIR/secondmate-launch.log" \
     PATH="$FAKEBIN_DIR:$BASE_PATH" \
-    "$ROOT/bin/fm-spawn.sh" "$id" "$HOME_DIR" --secondmate 2>&1)
-  expect_code 1 "$?" "an opencode2 secondmate must refuse"
-  assert_contains "$out" "cannot run a secondmate" "refusal must state the crewmate-only boundary"
-  pass "opencode2 refuses secondmate launches"
+    "$ROOT/bin/fm-spawn.sh" "$id" "$sm_home" --secondmate 2>&1)
+  expect_code 0 "$?" "an opencode2 secondmate must be allowed past the lifted primary-supervision boundary: $out"
+  assert_not_contains "$out" "cannot run a secondmate" "the lifted boundary must not refuse the launch"
+  meta="$HOME_DIR/state/$id.meta"
+  [ -f "$meta" ] || fail "the opencode2 secondmate spawn wrote no meta"
+  [ "$(sed -n 's/^harness=//p' "$meta")" = opencode2 ] \
+    || fail "secondmate meta must record harness=opencode2"
+  [ "$(sed -n 's/^kind=//p' "$meta")" = secondmate ] \
+    || fail "secondmate meta must record kind=secondmate"
+  # The secondmate launch delta has behavioral coverage: a secondmate carries
+  # no semantic busy wiring, so its launch line must keep the standalone and
+  # auto-approve shape while omitting the worker-only --session pin. Pinning
+  # the recorded line also guards the literal flag drop in bin/fm-spawn.sh
+  # against silent template drift, which would leave a literal placeholder on
+  # every secondmate launch.
+  launch=$(grep -F opencode2 "$CASE_DIR/secondmate-launch.log" | tail -1)
+  [ -n "$launch" ] || fail "no opencode2 launch line recorded for the secondmate spawn: $(cat "$CASE_DIR/secondmate-launch.log" 2>&1)"
+  assert_contains "$launch" "--standalone" "the secondmate launch must stay standalone"
+  assert_contains "$launch" "--auto" "the secondmate launch must keep auto-approve"
+  assert_not_contains "$launch" "--session" "a secondmate launches without the worker-only session pin"
+  assert_not_contains "$launch" "__OC2SESSION__" "the session placeholder must be fully substituted"
+  pass "opencode2 allows secondmate launches"
+}
+
+# drive_oc2_watch_arm <fixture-root> <state-dir> <arm-record>: load the real
+# watch-arm plugin at a fixture root and feed one turn-close event. The
+# fixture's bin/fm-watch-arm.sh is a recorder stub whose output satisfies the
+# plugin's readiness protocol, so whether the arm ran is observable behavior
+# through the plugin's public spawn contract.
+drive_oc2_watch_arm() {
+  local fixture_root=$1 home_dir=$2 arm_record=$3 state_dir
+  state_dir="$home_dir/state"
+  mkdir -p "$state_dir" "$fixture_root/bin"
+  printf 'kind=ship\n' >"$state_dir/task.meta"
+  cat >"$fixture_root/bin/fm-watch-arm.sh" <<SH
+#!/usr/bin/env bash
+printf 'arm-ran root=%s gen=%s\n' "\$PWD" "\$FM_ROOT_OVERRIDE" >> '$arm_record'
+printf 'watcher: started pid=%s recovery-generation=gportabletest\n' "\$\$"
+exit 0
+SH
+  chmod +x "$fixture_root/bin/fm-watch-arm.sh"
+  FIXTURE_ROOT="$fixture_root" STATE_DIR="$state_dir" ARM_RECORD="$arm_record" \
+  FM_HOME="$home_dir" FM_STATE_OVERRIDE="$state_dir" \
+  PLUGIN_PATH="$ROOT/.opencode/plugins/fm-primary-watch-arm.js" \
+    node --input-type=module - <<'EOF' 2>&1
+import { mkdirSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+mkdirSync(process.env.STATE_DIR, { recursive: true });
+// The session lock names this process so sessionOwnsLock passes and the
+// root predicate alone decides whether the arm spawns.
+writeFileSync(`${process.env.STATE_DIR}/.lock`, String(process.pid));
+const mod = await import(pathToFileURL(process.env.PLUGIN_PATH).href);
+const cleanup = await mod.default.setup({
+  location: { directory: process.env.FIXTURE_ROOT },
+  event: {
+    subscribe: () => ({
+      [Symbol.asyncIterator]: async function* () {
+        yield { type: "session.execution.succeeded", data: { sessionID: "ses_portable0000000000test" } };
+      },
+    }),
+  },
+  session: {
+    get: async () => ({ location: { directory: process.env.FIXTURE_ROOT } }),
+    prompt: async () => {},
+  },
+});
+await new Promise((resolve) => setTimeout(resolve, 1500));
+cleanup();
+EOF
+}
+
+test_oc2_watch_arm_root_predicate() {
+  local base sm_home marked_root work_repo unmarked_wt arm_record
+  base="$TMP_ROOT/oc2-watch-arm-roots"
+  sm_home="$base/home"
+  mkdir -p "$sm_home/state" "$base/rec"
+
+  # A marked secondmate home in plain-clone shape: the marker force-includes
+  # the root (bin/fm-primary-scope-lib.sh's rule), so the arm MUST run. This
+  # is the deployed secondmate shape the pre-fix predicate wrongly refused.
+  marked_root="$base/marked-home"
+  mkdir -p "$marked_root/bin"
+  printf '# Firstmate\n' >"$marked_root/AGENTS.md"
+  printf 'sm1\n' >"$marked_root/.fm-secondmate-home"
+  arm_record="$base/rec/marked.log"
+  : >"$arm_record"
+  drive_oc2_watch_arm "$marked_root" "$sm_home" "$arm_record" >/dev/null 2>&1
+  grep -q "arm-ran root=$marked_root" "$arm_record" \
+    || fail "a valid-marker secondmate home must arm: $(cat "$arm_record")"
+
+  # An unmarked linked worktree (the crewmate/scout shape) must stay silent.
+  work_repo="$base/repo"
+  mkdir -p "$work_repo"
+  git -C "$work_repo" init -q -b main
+  git -C "$work_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  unmarked_wt="$base/wt"
+  git -C "$work_repo" worktree add -q "$unmarked_wt" -b wt
+  mkdir -p "$unmarked_wt/bin"
+  printf '# Firstmate\n' >"$unmarked_wt/AGENTS.md"
+  arm_record="$base/rec/unmarked.log"
+  : >"$arm_record"
+  drive_oc2_watch_arm "$unmarked_wt" "$sm_home" "$arm_record" >/dev/null 2>&1
+  [ ! -s "$arm_record" ] \
+    || fail "an unmarked linked worktree must never arm: $(cat "$arm_record")"
+
+  # A crew worktree of a MARKED home (FM_HOME points at the marked home while
+  # the session root is the unmarked worktree) must also stay silent.
+  printf 'sm1\n' >"$sm_home/.fm-secondmate-home"
+  arm_record="$base/rec/crew-of-marked.log"
+  : >"$arm_record"
+  drive_oc2_watch_arm "$unmarked_wt" "$sm_home" "$arm_record" >/dev/null 2>&1
+  [ ! -s "$arm_record" ] \
+    || fail "a crew worktree of a marked home must never arm: $(cat "$arm_record")"
+
+  # An INVALID marker (symlink) does not force-include: the linked worktree
+  # falls through to the plain-checkout rule and stays silent.
+  rm -f "$sm_home/.fm-secondmate-home"
+  ln -s "$marked_root/.fm-secondmate-home" "$unmarked_wt/.fm-secondmate-home"
+  arm_record="$base/rec/bad-marker.log"
+  : >"$arm_record"
+  drive_oc2_watch_arm "$unmarked_wt" "$sm_home" "$arm_record" >/dev/null 2>&1
+  [ ! -s "$arm_record" ] \
+    || fail "an invalid marker must not force-include an unmarked worktree: $(cat "$arm_record")"
+
+  pass "opencode2 watch-arm arms a marked secondmate home and stays silent in crew worktrees"
 }
 
 # drive_oc2_plugin <plugin-path> <state-dir> <id> <events-json...>: load the
@@ -465,7 +601,7 @@ test_oc2_control_mechanics_are_the_verified_ones() {
   [ "$(fm_control_interrupt_press_gap opencode2)" = 0.5 ] || fail "armed presses must keep the verified gap"
   fm_control_harness_supports_kind opencode2 ship || fail "ship must be supported"
   fm_control_harness_supports_kind opencode2 scout || fail "scout must be supported"
-  fm_control_harness_supports_kind opencode2 secondmate && fail "secondmate must be refused" || true
+  fm_control_harness_supports_kind opencode2 secondmate || fail "secondmate must be supported after the 2026-10-23 primary-supervision verification"
   out=$(fm_control_harness_wiring_paths opencode2 /wt /state task1)
   printf '%s\n' "$out" | grep -Fqx '/wt/.opencode/plugins/fm-busy-state.js' || fail "wiring must include the plugin"
   printf '%s\n' "$out" | grep -Fqx '/state/task1.opencode-config' || fail "wiring must include the isolated config dir"
@@ -480,7 +616,9 @@ test_oc2_binary_resolution_refuses_without_2x \
   &&
   test_oc2_model_outside_the_platform_refuses \
   &&
-  test_oc2_secondmate_is_refused \
+  test_oc2_secondmate_is_allowed \
+  &&
+  test_oc2_watch_arm_root_predicate \
   &&
   test_oc2_plugin_classifies_from_execution_events \
   &&

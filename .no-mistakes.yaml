@@ -41,10 +41,15 @@ commands:
 # no-mistakes (v1.75.2 through v1.100.1) ships no stop-after-green or scenario-bound knob and
 # upstream #1484's ask for one was closed VISION-aligned to this instructions path, so the
 # runbook carries the bound; upstream completion-clause ask: https://github.com/kunchenguid/no-mistakes/issues/1576
+# The runbook also pins the structured-output contract: run 01M5NTVSDKFTZ4RJ0FGC1GWMSJ returned
+# verdict go with live evidence and still failed because passing scenarios omitted the required
+# reason field, and the schema-rejection correction turn cannot recover the rejected payload
+# (upstream https://github.com/kunchenguid/no-mistakes/issues/1577).
 test:
   instructions: |
     Finish the evidence turn when the proportionate scenario list for the change is driven: once every scenario in that list has a recorded pass, fail, or untested result, capture the evidence artifacts and return the verdict without authoring further scenarios.
     A green configured-suite baseline plus the targeted live scenarios for the changed behavior is the complete validation posture for this repository, so never broaden scenario coverage, build extra fixtures, or keep iterating after those results are recorded.
+    When you return the structured findings object, give every scenario in the scenarios array all five fields - name, result, live, evidence, and reason - including a short reason on every passing scenario, and always include a non-empty tested array, because a schema-rejected payload forces a correction turn that cannot see this evidence again.
     Run live Herdr scenarios only through bin/fm-herdr-lab.sh with a named non-default fm-lab-* session, following that helper's prepare, provision, run, and teardown contract exactly.
     Never touch the live default Herdr session or fleet panes.
     Prefer a throwaway lab for spawn, long-launch, and Claude-path proofs, and tear it down in the same evidence turn.

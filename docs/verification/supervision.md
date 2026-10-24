@@ -559,6 +559,38 @@ signal: /tmp/.../verify/fm-home/state/verify-task.status
 Every item passed, which is the evidence that lifted the `opencode2` crewmate/scout-only boundary; the adapter facts are in [`opencode2.md`](opencode2.md) and the harness reference's OpenCode 2.x section.
 The token-free portable guard for the plugin layer remains `bin/fm-test-run.sh tests/fm-opencode2-primary-plugins-live-e2e.test.sh`; rerun it, and this record's scenario, after every OpenCode upgrade before trusting primary supervision on 2.x.
 
+### Secondmate-home shape and recovery, 2026-10-23/24
+
+The first pass above ran in a plain clone, which is the MAIN-home shape; a real secondmate home additionally carries the `.fm-secondmate-home` marker the spawn validator requires.
+Review of the boundary lift found the ported watch-arm plugin's `isPrimaryRoot` excluded marker-carrying roots (the mirror image of `bin/fm-primary-scope-lib.sh`, which force-includes them), so the marker shape was re-verified after fixing the predicate to mirror the bash rule: a valid marker (regular file, nonempty id of `[A-Za-z0-9._-]`) force-includes the root, an invalid or absent marker falls through to the plain-checkout rule, and a crew worktree of a marked home stays silent.
+
+Same rig, second disposable clone at the fixed head carrying `echo sm-verify > .fm-secondmate-home` plus `data/charter.md`, its own scratch `FM_HOME` and synthetic task state, same mock and isolation.
+All five checks passed in this shape too:
+
+- the five plugins loaded in every server start with zero `failed to load plugin` lines;
+- the nudge fired exactly once (one `session-start` request), the scripted turn ran the real `bin/fm-lock.sh` inside the marked home (`lock acquired: harness pid 2727475`);
+- **the watch-arm plugin armed the marked home's watcher roughly one second after that turn closed** (`fm-watch.sh` pid 2730217 live, beacon fresh) - the exact path the old predicate refused;
+- a captain-relevant `needs-decision` line appended to `sm-task.status` was delivered back about 14 seconds later as the `WATCHER FIRED` operational prompt (`reason=actionable-signal`), handled in-session;
+- after teardown (TUI, watcher, and lock owner dead, the task meta kept so supervision stayed needed), a `--continue --prompt` relaunch resumed the same session id with no new `session.created` (no second nudge), and the real turn-end guard exited 2 exactly once - the request log held one `turn-end-guard` prompt and, after a 12-second settle, no second block - with the banner `1 task(s) in flight, but no live watcher holds this home lock (last beat: 42s ago)`.
+
+The secondmate liveness and recovery path was then exercised against the same scratch home, with a fake `opencode2` binary (version answer, platform `debug config` fixture, launch recorder) and a fake `tmux` on `PATH`, the staging pattern of `tests/fm-opencode2-harness.test.sh`:
+
+```text
+# classifier, before the recovery-set fix:
+STATUS=skipped STATE=unverified-harness REASON=recorded harness 'opencode2' is unverified for recovery (backend=tmux)
+# classifier, after admitting opencode2 to the recovery-verified set:
+STATUS=relaunchable STATE=missing CAUSE=recorded endpoint confidently missing WHERE=backend=tmux
+# the watcher poll tick's own respawn (bin/fm-watch.sh secondmate_liveness_tick):
+check: secondmate sm-verify auto-relaunched after recorded endpoint confidently missing (backend=tmux)
+# the same relaunch command the tick runs, directly:
+spawned sm-verify harness=opencode2 kind=secondmate mode=secondmate yolo=off window=:fm-sm-verify worktree=<the marked clone>
+```
+
+The staged secondmate launch line that respawn produced runs the real binary with `--standalone --auto --prompt <encoded charter brief>` and no `--session`: a secondmate carries no semantic busy wiring on any adapter, so there is no Firstmate-minted session id to pin.
+That evidence is what admitted `opencode2` to the recovery-verified harness set in `bin/fm-secondmate-liveness-lib.sh`; without it the alternative was documenting opencode2 secondmates as manually recovered.
+
+Every process this rig started was confined to the disposable homes: both TUI launchers and the plugin's arm children carried `FM_HOME`, `FM_ROOT_OVERRIDE`, and `FM_STATE_OVERRIDE` pointing only at the scratch homes, all armed watcher cycles live in the scratch homes' own `.watch-cycle-exits.log`, and teardown killed processes only by the pane tree of the dedicated tmux socket or by exact recorded pid.
+
 ## Watcher continuity
 
 The cross-harness evidence combines the 2026-07-17 live pass with Claude's replacement Stop-owned path revalidated on 2026-09-21, all against isolated project and home state.

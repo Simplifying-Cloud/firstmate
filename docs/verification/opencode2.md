@@ -126,6 +126,8 @@ Observed output on 2026-10-22:
 ok - opencode2 launch is standalone, config-isolated, and platform-only
 ok - opencode2 worker gets a per-task OPENCODE_CONFIG_DIR that keeps OpenCode off the operator's shared background server
 ok - opencode2 refuses a model outside the discovered platform providers
+ok - opencode2 allows secondmate launches
+ok - opencode2 watch-arm arms a marked secondmate home and stays silent in crew worktrees
 ok - opencode2 plugin classifies from session.execution events, scoped to the latched worker session
 ok - an opencode2 plugin in a shared server ignores foreign-directory sessions
 ok - an opencode2 settle racing teardown cannot resurrect task records
@@ -134,7 +136,7 @@ ok - opencode2 opencode v2.0.32 live: standalone TUI turn drove the generated pl
 ok - opencode2 opencode v2.0.32 live: two workers on one shared background server kept each task busy record and turn-ended notification confined to its own worktree
 ```
 
-The portable suite pins binary selection, the platform-only launch line, the worker environment's isolated config dir and its service setting (by running the staged launch line against a fake 2.x binary), model refusals, the secondmate refusal, persistence and launch of the pinned session id, rejection of a competing session even in the same worktree, the pinned session's busy->idle and notification touch, the teardown-racing settle refusal, and the control tables against fake binaries.
+The portable suite pins binary selection, the platform-only launch line, the worker environment's isolated config dir and its service setting (by running the staged launch line against a fake 2.x binary), model refusals, the allowed secondmate launch with its session-pin-free launch line, the watch-arm root predicate for marked secondmate homes and crew worktrees, persistence and launch of the pinned session id, rejection of a competing session even in the same worktree, the pinned session's busy->idle and notification touch, the teardown-racing settle refusal, and the control tables against fake binaries.
 Both live guards are token-free and run by default wherever their tools are installed, capability-skipping elsewhere: the signals guard needs `opencode2`, `tmux`, `python3`, `node`, and `curl` and drives the TUI against a localhost mock, and the isolation guard needs `opencode2` and `python3` and runs the real binary against a stand-in operator under the XDG directories, with each isolated verdict paired with a control run that must see the stand-in operator's config.
 
 ## Not verified

@@ -1,0 +1,2 @@
+[21:57:33] s2 [{"type": "text", "text": "FMPROBE_S2_START: reply with exactly FMPROBE_S2_DONE.", "cache_control": {"type": "ephemeral"}}]
+[21:57:34] s2 [{"type": "text", "text": "⁣FIRSTMATE_OP: v1 turn-end-guard: TURN WOULD END BLIND - supervision is off. The watcher cycle is missing, failed, or unhealthy. Follow the harness recovery instruction belo

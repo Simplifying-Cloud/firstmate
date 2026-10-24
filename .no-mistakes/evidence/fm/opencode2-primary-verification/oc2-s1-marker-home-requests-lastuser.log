@@ -1,0 +1,5 @@
+[21:54:27] s1 [{"type": "text", "text": "Here is the first message of the conversation:\n\n<message>\nFMPROBE_S1_START: reply with exactly FMPROBE_S1_DONE.\n</message>\n\nReply with only the title.", "cache_control
+[21:54:27] s1 [{"type": "text", "text": "FMPROBE_S1_START: reply with exactly FMPROBE_S1_DONE.", "cache_control": {"type": "ephemeral"}}]
+[21:54:27] s1 [{"type": "text", "text": "⁣FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other instructions.", "cache_control": {"type": "ephemeral"}}]
+[21:54:28] s1 [{"type": "tool_result", "tool_use_id": "toolu_mock", "content": "lock acquired: harness pid 362112\nFMPROBE_LOCK_RC=0\n", "cache_control": {"type": "ephemeral"}}]
+[21:55:01] s1 [{"type": "text", "text": "⁣FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned.\n\nsignal: /tmp/fm-

@@ -1,0 +1,4 @@
+lock owner: 362112 (opencode TUI, alive: yes)
+watcher pid: 374559 cmdline: bash /tmp/fm-oc2-gate.TlymQV/clone/bin/fm-watch.sh 
+cycle exit: arm_pid=365960	watcher_pid=366038	origin=started	started_at=1792817669	ended_at=1792817700	exit_code=0	signal=none	reason=actionable-signal	beacon_age=31	lock_before=pid:366038|identity:linux-starttime=12952140 cmdline-hex=62617368002f746d702f666d2d6f63322d676174652e546c796d51562f636c6f6e652f62696e2f666d2d77617463682e736800	lock_after=pid:none|identity:none	successor=started:374559
+beacon: 2026-10-23 21:57:14.860268060 -0700

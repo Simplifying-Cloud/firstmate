@@ -1,0 +1,45 @@
+   FMPROBE_S1_DONE               +
+
+  ┃                                                                                                                     FMPROBE_S1_DONE
+  ┃  FMPROBE_S1_START: reply with exactly FMPROBE_S1_DONE.
+  ┃                                                                                                                     Context
+                                                                                                                        6 tokens
+     FMPROBE_S1_DONE                                                                                                    0% used
+
+     Build · Mock 1 · 730ms · 1.4 tok/s
+
+  ┃
+  ┃  FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other
+  ┃  instructions.
+  ┃
+
+  ┃
+  ┃  $ bash bin/fm-lock.sh; echo FMPROBE_LOCK_RC=$?
+  ┃
+  ┃  lock acquired: harness pid 362112
+  ┃  FMPROBE_LOCK_RC=0
+  ┃
+
+     FMPROBE_TURN1_DONE
+
+     Build · Mock 1 · 2.4s · 1.4 tok/s
+
+  ┃
+  ┃  FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported
+  ┃  wake. Watcher continuity is plugin-owned.
+  ┃
+  ┃  signal: /tmp/fm-lab.oOZiIA/state/gate-task.status
+  ┃
+
+     FMPROBE_WAKE_HANDLED
+
+     Build · Mock 1 · 718ms · 1.4 tok/s
+
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · Mock 1 Mock Z
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /tmp/fm-oc2-gate.TlymQV/clone:fm/opencode2-primary-verification                            6 (0%)  ctrl+p commands    /…/clo…/opencode2-primary-verification
+

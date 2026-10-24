@@ -1,0 +1,3 @@
+[21:36:00] s1 [{"type": "text", "text": "Here is the first message of the conversation:\n\n<message>\nFMPROBE_S1_START: reply with exactly FMPROBE_S1_DONE.\n</message>\n\nReply with only the title.", "cache_control
+[21:36:00] s1 [{"type": "text", "text": "FMPROBE_S1_START: reply with exactly FMPROBE_S1_DONE.", "cache_control": {"type": "ephemeral"}}]
+[21:36:01] s1 [{"type": "text", "text": "⁣FIRSTMATE_OP: v1 turn-end-guard: TURN WOULD END BLIND - supervision is off. The watcher cycle is missing, failed, or unhealthy. Follow the harness recovery instruction belo

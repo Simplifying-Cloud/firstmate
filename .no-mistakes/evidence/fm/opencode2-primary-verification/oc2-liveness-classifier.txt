@@ -1,0 +1,6 @@
+Live drive of bin/fm-secondmate-liveness-lib.sh fm_secondmate_liveness_probe (mode=poll),
+real lib sourced from the gate worktree at 93be553d, real tmux binary, TMUX_TMPDIR on an
+empty scratch socket dir so the recorded window fmgate:fm-sm-gate is confidently missing.
+
+harness=opencode2 -> STATUS=relaunchable STATE=missing KILL=0 CAUSE=recorded endpoint confidently missing WHERE=backend=tmux
+harness=muse      -> STATUS=skipped STATE=unverified-harness REASON=recorded harness 'muse' is unverified for recovery (backend=tmux)

@@ -1,0 +1,14 @@
+== plugin loading across both live sessions (root /tmp/fm-oc2-gate.TlymQV/clone) ==
+loading: cd-check
+loading: pretool-check
+loading: sessionstart-nudge
+loading: turnend-guard
+loading: watch-arm
+loading: cd-check
+loading: pretool-check
+loading: sessionstart-nudge
+loading: turnend-guard
+loading: watch-arm
+failed-to-load lines for this root: 0
+== session continuity: does the resumed conversation carry session 1 history? ==
+s1-history-in-s2-request=yes guard-prompt-in-log=yes

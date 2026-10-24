@@ -1,0 +1,45 @@
+ • FMPROBE_S1_DONE               +
+
+  ┃                                                                                                                     FMPROBE_S1_DONE
+  ┃  FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported
+  ┃  wake. Watcher continuity is plugin-owned.                                                                          Context
+  ┃                                                                                                                     6 tokens
+  ┃  signal: /tmp/fm-lab.oOZiIA/state/gate-task.status                                                                  0% used
+  ┃
+
+     FMPROBE_WAKE_HANDLED
+
+     Build · Mock 1 · 718ms · 1.4 tok/s
+
+  ┃
+  ┃  FMPROBE_S2_START: reply with exactly FMPROBE_S2_DONE.
+  ┃
+
+     FMPROBE_S2_DONE
+
+     Build · Mock 1 · 727ms · 1.4 tok/s
+
+  ┃
+  ┃  FIRSTMATE_OP: v1 turn-end-guard: TURN WOULD END BLIND - supervision is off. The watcher cycle is missing,
+  ┃  failed, or unhealthy. Follow the harness recovery instruction below before ending the turn.
+  ┃
+  ┃  ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ┃  ●  TURN WOULD END BLIND - SUPERVISION IS OFF
+  ┃  ●  1 task(s) in flight, but no live watcher holds this home lock (last beat: 20s ago).
+  ┃  ●  repair missing watcher supervision by letting the OpenCode TUI plugin arm after idle; use bin/fm-watch-arm.
+  ┃  sh only as a manual recovery probe if the plugin reports failure.
+  ┃  ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ┃
+  ┃
+
+     FMPROBE_BLIND_FOLLOWED
+
+     Build · Mock 1 · 726ms · 1.4 tok/s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · Mock 1 Mock Z
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /tmp/fm-oc2-gate.TlymQV/clone:fm/opencode2-primary-verification                            6 (0%)  ctrl+p commands    /…/clo…/opencode2-primary-verification
+

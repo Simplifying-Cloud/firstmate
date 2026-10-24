@@ -120,7 +120,7 @@ FM_OPENCODE2_SIGNALS_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-signals-live-e
 FM_OPENCODE2_ISOLATION_LIVE=1 bin/fm-test-run.sh tests/fm-opencode2-isolation-live-e2e.test.sh
 ```
 
-Observed output on 2026-10-22:
+Observed output on 2026-10-22; the secondmate and watch-arm rows come from the 2026-10-23/24 verification pass ([`supervision.md`](supervision.md#opencode-2x-primary-plugin-supervision-2026-10-23)):
 
 ```text
 ok - opencode2 launch is standalone, config-isolated, and platform-only

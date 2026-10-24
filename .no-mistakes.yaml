@@ -35,8 +35,16 @@ commands:
 
 # Publish each run's test evidence to the orphan no-mistakes/evidence branch linked from the PR.
 # The evidence is not committed to the feature or default branch.
+# The instructions bound the evidence turn: on 2026-10-23 runs 01M5MZ1P12YK2HRDTQZPMCYH14 and
+# 01M5N34GJ0MM5FRAJC9CXJH5G8 completed every suite green and were killed at the 30m test-agent
+# wall while authoring extra live scenarios, parking green work for a manual budget-cut approval.
+# no-mistakes (v1.75.2 through v1.100.1) ships no stop-after-green or scenario-bound knob and
+# upstream #1484's ask for one was closed VISION-aligned to this instructions path, so the
+# runbook carries the bound; upstream completion-clause ask: https://github.com/kunchenguid/no-mistakes/issues/1576
 test:
   instructions: |
+    Finish the evidence turn when the proportionate scenario list for the change is driven: once every scenario in that list has a recorded pass, fail, or untested result, capture the evidence artifacts and return the verdict without authoring further scenarios.
+    A green configured-suite baseline plus the targeted live scenarios for the changed behavior is the complete validation posture for this repository, so never broaden scenario coverage, build extra fixtures, or keep iterating after those results are recorded.
     Run live Herdr scenarios only through bin/fm-herdr-lab.sh with a named non-default fm-lab-* session, following that helper's prepare, provision, run, and teardown contract exactly.
     Never touch the live default Herdr session or fleet panes.
     Prefer a throwaway lab for spawn, long-launch, and Claude-path proofs, and tear it down in the same evidence turn.

@@ -172,31 +172,22 @@ test_opencode_plugin_delivers_exact_nudge_once() {
     "$ROOT/bin/fm-gate-refuse-lib.sh" "$ROOT/bin/fm-operational-input.sh" "$root/bin/"
   chmod +x "$root/bin/fm-sessionstart-nudge.sh"
   out=$(PLUGIN="$ROOT/.opencode/plugins/fm-primary-sessionstart-nudge.js" \
-    WORKTREE="$root" EXPECTED="$NUDGE_LINE" node --input-type=module 2>&1 <<'EOF'
+    STUB="$ROOT/tests/opencode-plugin-stub.mjs" \
+    WORKTREE="$root" FOREIGN="$TMP_ROOT/opencode-foreign" EXPECTED="$NUDGE_LINE" node --input-type=module 2>&1 <<'EOF'
 import { pathToFileURL } from "node:url";
+const { loadOpencodePlugin, sessionCreatedEvent } = await import(pathToFileURL(process.env.STUB).href);
 
-const prompts = [];
-const client = {
-  session: {
-    promptAsync: async (request) => {
-      prompts.push(request.body.parts[0].text);
-    },
-  },
-};
-const mod = await import(pathToFileURL(process.env.PLUGIN).href);
-const hooks = await mod.FmPrimarySessionstartNudge({
-  client,
+const driver = await loadOpencodePlugin(process.env.PLUGIN, {
   directory: process.env.WORKTREE,
-  worktree: process.env.WORKTREE,
 });
-const event = {
-  type: "session.created",
-  properties: { sessionID: "session-nudge-test", info: { id: "session-nudge-test" } },
-};
-await hooks.event({ event });
-await hooks.event({ event });
-if (prompts.length !== 1) throw new Error(`expected one prompt, got ${prompts.length}`);
-if (prompts[0] !== process.env.EXPECTED) throw new Error(`unexpected prompt: ${prompts[0]}`);
+await driver.emit(sessionCreatedEvent("session-nudge-test", process.env.WORKTREE));
+await driver.emit(sessionCreatedEvent("session-nudge-test", process.env.WORKTREE));
+// One 2.x server hosts sessions from many directories: a session created at
+// a foreign directory must never receive the nudge from this location.
+await driver.emit(sessionCreatedEvent("session-nudge-foreign", process.env.FOREIGN));
+await driver.emit(sessionCreatedEvent("session-nudge-child", process.env.WORKTREE, { parentID: "session-nudge-test" }));
+if (driver.prompts.length !== 1) throw new Error(`expected one prompt, got ${driver.prompts.length}`);
+if (driver.prompts[0] !== process.env.EXPECTED) throw new Error(`unexpected prompt: ${driver.prompts[0]}`);
 EOF
   ) || status=$?
   expect_code 0 "$status" "OpenCode exact nudge delivery"

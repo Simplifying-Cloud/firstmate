@@ -1002,14 +1002,20 @@ EOF
 }
 
 test_opencode_plugin_anchors_guard_to_worktree() {
-  local plugin parent worktree_dir wrong_dir out status
+  local plugin parent worktree_dir launch_dir wrong_dir out status
   plugin="$ROOT/.opencode/plugins/fm-primary-turnend-guard.js"
   [ -f "$plugin" ] || fail "tracked OpenCode primary plugin is missing"
   parent="$TMP_ROOT/opencode-plugin-parent"
-  git init -q "$parent"
+  mkdir -p "$parent"
   worktree_dir="$parent/nested/opencode-plugin-worktree"
   wrong_dir="$TMP_ROOT/opencode-plugin-cwd/subdir"
-  mkdir -p "$worktree_dir/bin" "$wrong_dir"
+  launch_dir="$worktree_dir/deep/subdir"
+  mkdir -p "$worktree_dir/bin" "$wrong_dir" "$launch_dir"
+  # OpenCode 2.x hands the plugin only ctx.location.directory, so the worktree
+  # under test is its own git repository and the plugin is launched from a deep
+  # subdirectory of it: the git-root resolution from the location directory is
+  # the V2 replacement for the V1 worktree argument and must anchor the guard.
+  git init -q "$worktree_dir"
   cat > "$worktree_dir/bin/fm-turnend-guard.sh" <<'EOF'
 #!/usr/bin/env bash
 cat >/dev/null
@@ -1018,24 +1024,24 @@ exit 2
 EOF
   chmod +x "$worktree_dir/bin/fm-turnend-guard.sh"
   # Runtime module-format warnings are host noise; this assertion owns plugin output only.
-  out=$(NODE_NO_WARNINGS=1 PLUGIN="$plugin" DIRECTORY="$wrong_dir" WORKTREE="$worktree_dir" node 2>&1 <<'EOF'
+  # OpenCode 2.x gives the plugin only ctx.location.directory (here a deep
+  # subdirectory, the 2.x shape of a launch from inside the worktree), so the
+  # git-root resolution from that directory is what must anchor the guard to
+  # the worktree root. The turn end rides session.execution.succeeded because
+  # 2.x never publishes session.idle.
+  out=$(NODE_NO_WARNINGS=1 PLUGIN="$plugin" STUB="$ROOT/tests/opencode-plugin-stub.mjs" WORKTREE="$worktree_dir" LAUNCH_DIR="$launch_dir" node --input-type=module 2>&1 <<'EOF'
 import { pathToFileURL } from "node:url";
+const { loadOpencodePlugin, turnEndEvent } = await import(pathToFileURL(process.env.STUB).href);
 
-const mod = await import(pathToFileURL(process.env.PLUGIN).href);
-let promptBody = "";
-const client = {
-  session: {
-    promptAsync: async (request) => {
-      promptBody = request.body.parts[0].text;
-    },
-  },
-};
-const hooks = await mod.FmPrimaryTurnendGuard({
-  client,
-  directory: process.env.DIRECTORY,
-  worktree: process.env.WORKTREE,
+const driver = await loadOpencodePlugin(process.env.PLUGIN, {
+  directory: process.env.LAUNCH_DIR,
+  sessionDirectory: (sessionID) => (sessionID === "session-foreign"
+    ? "/tmp/fm-opencode-plugin-foreign-elsewhere"
+    : process.env.LAUNCH_DIR),
+  sessionParentID: (sessionID) => (sessionID === "session-child" ? "session-test" : undefined),
 });
-await hooks.event({ event: { type: "session.idle", properties: { sessionID: "session-test" } } });
+await driver.emit(turnEndEvent("session-test"));
+const promptBody = driver.prompts[0] ?? "";
 if (!promptBody.startsWith("\u2063FIRSTMATE_OP: v1 turn-end-guard: ")) {
   console.error(`untyped operational prompt: ${promptBody}`);
   process.exit(1);
@@ -1050,6 +1056,19 @@ if (!promptBody.includes("watcher cycle is missing, failed, or unhealthy")) {
 }
 if (promptBody.includes("Resume supervision according to the session-start operating block")) {
   console.error(`ordinary continuity leaked into guard follow-up: ${promptBody}`);
+  process.exit(1);
+}
+// One 2.x server hosts sessions from many directories: the turn end of a
+// foreign session must never fire this guard or prompt that other session.
+await driver.emit(turnEndEvent("session-foreign"));
+// The guard is an event plugin scoped to top-level sessions: the turn end
+// of a subagent child session at this same root never fires it - the tool
+// seatbelts, not this guard, cover child session shell calls.
+await driver.emit(turnEndEvent("session-child"));
+// The follow-up close from the guard itself is skipped exactly once per session.
+await driver.emit(turnEndEvent("session-test"));
+if (driver.prompts.length !== 1) {
+  console.error(`expected exactly one prompt, got ${driver.prompts.length}`);
   process.exit(1);
 }
 EOF

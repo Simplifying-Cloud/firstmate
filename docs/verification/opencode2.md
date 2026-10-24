@@ -138,7 +138,7 @@ Both live guards are token-free and run by default wherever their tools are inst
 
 ## Not verified
 
-- No 2.x primary supervision integration (turn-end guard, watch-arm, session-start nudge in the 2.x plugin form), which is why a secondmate on `opencode2` is refused.
+- No full 2.x primary supervision integration: the ported default-export `.opencode/plugins/` are live-verified on 2.1.4 (2026-10-23; `bin/fm-test-run.sh tests/fm-opencode2-primary-plugins-live-e2e.test.sh`) for plugin loading, tool-guard blocking, and one follow-up prompt in headless sessions, but full TUI watcher continuity has not been re-verified end to end on 2.x, which is why a secondmate on `opencode2` is still refused.
 - No sandbox placement: a sandbox host has none of the operator's OpenCode 2.x platform sign-in, so the org providers cannot resolve there.
 - No effort mapping: no platform model exposes a variant list on 2.0.32, so the record-and-omit posture is untestable beyond its omission.
 - No OpenCode Console sign-in: the 2.0.32 source loads a signed-in Console account's MCP servers and policies from the credential store, outside any config dir, and registers those MCP servers ahead of config-defined ones, but no Console connection exists here to exercise it.

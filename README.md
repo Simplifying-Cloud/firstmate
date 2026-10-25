@@ -215,6 +215,7 @@ Firstmate's skills live in two separate places with different audiences:
   Each one is a self-contained skill with no dependency on firstmate's paths, tools, or vocabulary.
   Today that is `skills/stow`, a generic session-knowledge-sweep skill that routes findings by explicit instruction first, then existing local conventions, then a private `.stow-notes.md` fallback, and curates tiered entries through decay, local archival, and user-approved on-demand offload proposals.
   It intentionally shares no code with the firstmate-internal `.agents/skills/stow` it is named after, so the two can evolve independently.
+  The directory also holds `skills/security-audit`, a pinned byte-for-byte vendored copy of Cloudflare's [security-audit-skill](https://github.com/cloudflare/security-audit-skill) for multi-phase security audits; `skills/security-audit/PROVENANCE.md` records the pinned commit and the deliberate-update procedure, and firstmate points audit workers at it by absolute path rather than installing it anywhere.
 
 ## Documentation
 

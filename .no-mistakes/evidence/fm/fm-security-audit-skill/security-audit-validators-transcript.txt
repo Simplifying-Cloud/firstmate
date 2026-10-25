@@ -1,0 +1,28 @@
+== validate-findings.cjs: valid document ==
+$ node /home/dscott/.no-mistakes/worktrees/a1211da81307/01M5R2VXK9J5FB5V2KPXDAABY7/skills/security-audit/validate-findings.cjs /tmp/fm-audit-val.YzDIJr/findings.json
+PASS: 2 findings valid
+[exit 0]
+
+== validate-findings.cjs: adversarial document (unknown severity enum) ==
+$ node /home/dscott/.no-mistakes/worktrees/a1211da81307/01M5R2VXK9J5FB5V2KPXDAABY7/skills/security-audit/validate-findings.cjs /tmp/fm-audit-val.YzDIJr/findings-invalid.json
+ERROR: $[1]: must match exactly one schema in oneOf; matched 0
+ERROR: $[1].severity.overall_severity: invalid value "catastrophic" (expected one of "informational", "low", "medium", "high", "critical")
+FAIL: 2 validation error(s)
+[exit 1]
+
+== validate-findings.cjs: missing file ==
+$ node /home/dscott/.no-mistakes/worktrees/a1211da81307/01M5R2VXK9J5FB5V2KPXDAABY7/skills/security-audit/validate-findings.cjs /tmp/fm-audit-val.YzDIJr/nope.json
+Failed to read findings JSON: input could not be opened or read safely
+[exit 1]
+
+== validate-coverage-ledger.cjs: consistent ledger ==
+$ node /home/dscott/.no-mistakes/worktrees/a1211da81307/01M5R2VXK9J5FB5V2KPXDAABY7/skills/security-audit/validate-coverage-ledger.cjs /tmp/fm-audit-val.YzDIJr/coverage-ledger.json
+PASS: 1 coverage units valid
+[exit 0]
+
+== validate-coverage-ledger.cjs: tampered coverage_id ==
+$ node /home/dscott/.no-mistakes/worktrees/a1211da81307/01M5R2VXK9J5FB5V2KPXDAABY7/skills/security-audit/validate-coverage-ledger.cjs /tmp/fm-audit-val.YzDIJr/coverage-ledger-tampered.json
+ERROR: $[0].coverage_id: expected canonical ID "src%2Fproxy.ts%23POST%20%2Fsession::src%2Fauth.ts%23verifyToken::platform-proxy::WEB-PROTOCOL-AND-AUTH.md%23Session%20handling"
+FAIL: 1 validation error(s)
+[exit 1]
+
